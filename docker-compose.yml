@@ -1,0 +1,13 @@
+services:
+  archival-htr:
+    build: .
+    env_file: .env
+    volumes:
+      - ./data/input:/data/input
+      - ./data/output:/data/output
+      - chroma_store:/data/chroma
+    # Override CMD at runtime, e.g:
+    # docker compose run archival-htr search "battle of hastings"
+
+volumes:
+  chroma_store:

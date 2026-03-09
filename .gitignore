@@ -1,0 +1,31 @@
+### Data & config files ###
+data/chroma/*
+data/input/*
+data/output/*
+.env
+### AI generated files ###
+.idea/
+.vscode/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.DS_Store
+*.sqlite3
+*.db
+*.log
+*.egg-info/
+*.bak
+.coverage
+.cache/
+dist/
+build/
+.nox/
+.mypy_cache/
+.pytest_cache/
+# Hatch build output
+*.hatch/
+# Local test results
+.tox/
+# Jupyter
+*.ipynb_checkpoints
