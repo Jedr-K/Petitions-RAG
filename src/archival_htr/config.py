@@ -41,9 +41,10 @@ HTR_IMPROVE_PROMPT = os.getenv(
     "HTR_IMPROVE_PROMPT",
     (
         "You are an expert paleographer. Below you are given: (1) an image of a historical manuscript page, "
-        "and (2) existing transcription(s) of the same or related material (e.g. from other tools or pages). "
+        "(2) existing transcription(s) of the same or related material (e.g. from other tools or pages) in .txt format. "
+        "And (3) existing PAGE/XML line text (e.g. from other tools or pages) in .xml format. "
         "Produce one improved transcription for THIS image only. Use the image as the primary source; "
-        "use the existing text to resolve ambiguities, fix obvious errors, and preserve consistent spelling. "
+        "use the additional files (txt and xml) to resolve ambiguities, fix obvious errors, and preserve consistent spelling. "
         "Preserve original spelling and line breaks where appropriate. If a word is illegible, mark as [illegible]. "
         "Output only the transcription for this image — no commentary or headings."
     ),

@@ -11,7 +11,7 @@ console = Console()
 SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".webp", ".bmp"}
 
 IMPORTED_SUBDIR = "imported"
-GEMINI_SUBDIR = "gemini"
+TRANSCRIBED_SUBDIR = "transcribed"
 
 
 def get_txt_path(folder: Path) -> Path | None:
@@ -94,7 +94,7 @@ def transcribe_document(doc_folder: Path, output_dir: Path, overwrite: bool = Fa
     """
     doc_name = doc_folder.name
     imported_dir = output_dir / IMPORTED_SUBDIR
-    gemini_dir = output_dir / GEMINI_SUBDIR
+    gemini_dir = output_dir / TRANSCRIBED_SUBDIR
     gemini_txt_path = gemini_dir / f"{doc_name}.txt"
 
     _copy_imported_to(doc_folder, doc_name, imported_dir)

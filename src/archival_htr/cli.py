@@ -17,9 +17,9 @@ def transcribe(
     input_dir: Path = typer.Option(None, "--input", "-i", help="Folder of document subfolders"),
     output_dir: Path = typer.Option(None, "--output", "-o", help="Where to write .txt files"),
     overwrite: bool = typer.Option(False, "--overwrite", help="Re-transcribe already-done docs"),
-    doc: list[str] = typer.Option(default=[], "--doc", "-d", help="Process only these subfolder names; omit for all"),
+    doc: list[str] = typer.Option([], "--doc", "-d", help="Process only these subfolder names; omit for all"),
 ):
-    """Transcribe manuscript images to .txt using Gemini Vision. Use --doc to limit to specific documents."""
+    """Transcribe manuscript images to .txt. Use --doc to limit to specific documents."""
     from archival_htr.ingest import ingest_all
     ingest_all(input_dir=input_dir, output_dir=output_dir, overwrite=overwrite, doc_names=doc or None)
 
@@ -39,7 +39,7 @@ def ingest(
     input_dir: Path = typer.Option(None, "--input", "-i"),
     output_dir: Path = typer.Option(None, "--output", "-o"),
     overwrite: bool = typer.Option(False, "--overwrite"),
-    doc: list[str] = typer.Option(default=[], "--doc", "-d", help="Process only these subfolder names; omit for all"),
+    doc: list[str] = typer.Option([], "--doc", "-d", help="Process only these subfolder names; omit for all"),
 ):
     """Run transcribe + index in one step. Use --doc to limit to specific documents."""
     from archival_htr.ingest import ingest_all

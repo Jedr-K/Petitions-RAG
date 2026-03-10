@@ -48,22 +48,29 @@ def _ollama_post(endpoint: str, payload: dict) -> dict:
 # Transcription
 # ---------------------------------------------------------------------------
 
-def _transcribe_gemini(image_path: Path) -> str:
+def _build_prompt(existing_context: str) -> str:
+    """Return the appropriate prompt depending on whether existing context is available."""
+    if existing_context:
+        return f"{config.HTR_IMPROVE_PROMPT}\n\nExisting transcription context:\n{existing_context}"
+    return config.HTR_PROMPT
+
+
+def _transcribe_gemini(image_path: Path, existing_context: str = "") -> str:
     import google.generativeai as genai
     from PIL import Image as PILImage
 
     genai.configure(api_key=config.GEMINI_API_KEY)
     model = genai.GenerativeModel(config.GEMINI_MODEL)
     image = PILImage.open(image_path)
-    response = model.generate_content([config.HTR_PROMPT, image])
+    response = model.generate_content([_build_prompt(existing_context), image])
     return response.text.strip()
 
 
-def _transcribe_ollama(image_path: Path) -> str:
+def _transcribe_ollama(image_path: Path, existing_context: str = "") -> str:
     img_b64, _ = _image_to_base64(image_path)
     payload = {
         "model": config.OLLAMA_VISION_MODEL,
-        "prompt": config.HTR_PROMPT,
+        "prompt": _build_prompt(existing_context),
         "images": [img_b64],
         "stream": False,
     }
@@ -71,12 +78,12 @@ def _transcribe_ollama(image_path: Path) -> str:
     return result["response"].strip()
 
 
-def transcribe_image(image_path: Path) -> str:
-    """Transcribe a single manuscript image page."""
+def transcribe_image(image_path: Path, existing_context: str = "") -> str:
+    """Transcribe a single manuscript image page, optionally guided by existing context."""
     config.validate_config()
     if config.BACKEND == "gemini":
-        return _transcribe_gemini(image_path)
-    return _transcribe_ollama(image_path)
+        return _transcribe_gemini(image_path, existing_context)
+    return _transcribe_ollama(image_path, existing_context)
 
 
 # ---------------------------------------------------------------------------
