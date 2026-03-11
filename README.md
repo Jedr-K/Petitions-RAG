@@ -14,7 +14,7 @@ cp .env.example .env
 # 3. Build the container
 docker compose build
 
-# 4. Transcribe + index in one step
+# 4. Transcribe + metadata + index in one step
 docker compose run archival-htr ingest
 
 # 5. Search
@@ -25,12 +25,14 @@ docker compose run archival-htr search "your query here" --results 10
 
 | Command | Description |
 |---|---|
-| `transcribe` | Image → .txt via Gemini Vision |
+| `transcribe` | Image → .txt via vision model; then metadata annotation + combine |
+| `metadata` | Run metadata (image + transcript → CSV) for all transcribed docs, then combine |
+| `combine-metadata` | Merge all single-line metadata CSVs in `output/metadata/` into `combined.csv` |
 | `index` | .txt → ChromaDB vector store |
-| `ingest` | transcribe + index in one step |
+| `ingest` | transcribe + metadata + index in one step |
 | `search` | Query the corpus |
 
-Use `--doc` / `-d` on `transcribe` or `ingest` to process only named subfolders; omit to process all.
+Use `--doc` / `-d` on `transcribe`, `ingest`, or `metadata` to limit to named subfolders. Use `--no-metadata` on `transcribe` or `ingest` to skip metadata annotation and combine.
 
 ```bash
 # Single-document test (Docker)
@@ -40,19 +42,31 @@ docker compose run --rm archival-htr transcribe --doc 14245707_0001_113628200
 docker run --rm -v "$(pwd)/data:/data" --env-file .env archival-htr transcribe --doc 14245707_0001_113628200
 ```
 
-## Input convention
+## Input and output
 
-One subfolder per document, images named in page order:
+**Input:** Either (1) one subfolder per document, with images inside each subfolder, or (2) no subfolders — then the whole input directory is treated as a single document (root-level images only). Pages are processed in sorted filename order.
 
 ```
 data/input/
   manuscript_001/
     page_01.jpg
     page_02.jpg
+    manuscript_001.txt    # optional: earlier transcript (used as HTR context)
+    manuscript_001.xml    # optional: PAGE XML (line text used as context)
   manuscript_002/
     page_01.png
     ...
 ```
+
+Document folders cancontain existing **.txt** transcripts and **.xml** (PAGE XML) files. If present — either `{folder_name}.txt` / `{folder_name}.xml` or a single .txt and single .xml in the folder — they are used as context to improve transcription and are copied to `output/imported/`.
+
+With no subfolders (flat layout), put images directly in `data/input/`; the document name will be the input folder name (e.g. `input`).
+
+**Output** (under `data/output/` or `--output`):
+
+- `imported/` — copied .txt/.xml from input
+- `transcribed/` — one .txt per document (full HTR)
+- `metadata/` — one single-line CSV per analysed (image, transcript) pair; `metadata/combined.csv` is the merged table (language, category, date, etc.). Categories (Dutch): Petitie, Sollicitatie, Appostille/addendum, Rapport, Bijlage, Attest, Andere. To add a single image: use `ingest.annotate_and_write_metadata(image_path, transcript, output_dir, doc_name, page_id)`, then run `combine-metadata`.
 
 ## Docker + Ollama (Connection refused)
 
