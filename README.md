@@ -44,28 +44,35 @@ docker run --rm -v "$(pwd)/data:/data" --env-file .env archival-htr transcribe -
 
 ## Input and output
 
-**Input:** Either (1) one subfolder per document, with images inside each subfolder, or (2) no subfolders — then the whole input directory is treated as a single document (root-level images only). Pages are processed in sorted filename order.
+**Input:** Collection folders. Each subfolder of `data/input/` is one collection (one multi-page document). Inside a collection:
+
+- **Root:** page images (`.jpg`, `.png`, etc.) and optional metadata (e.g. `metadata.xml`, `mets.xml`). Only image files are used as pages; processing order is sorted by filename.
+- **Subfolders:** `txt/` and `page/` hold per-page transcripts and PAGE XML. File names share the same stem as the image: e.g. image `14245707_0003_113628074.jpg` → `txt/14245707_0003_113628074.txt`, `page/14245707_0003_113628074.xml`. These are used as HTR context for that page and copied to `output/imported/{doc_name}/`.
+
+Naming convention: stems can be `collectionID__readableId__objectID` (two underscores). The same stem links image, `.txt`, and `.xml` across root, `txt/`, and `page/`.
+
+If there are no subfolders in `data/input/`, the input dir itself is treated as one collection (flat layout).
 
 ```
 data/input/
-  manuscript_001/
-    page_01.jpg
-    page_02.jpg
-    manuscript_001.txt    # optional: earlier transcript (used as HTR context)
-    manuscript_001.xml    # optional: PAGE XML (line text used as context)
-  manuscript_002/
-    page_01.png
+  393/                              # collection folder (doc name = 393)
+    metadata.xml
+    mets.xml
+    14245707_0003_113628074.jpg     # images in root
+    14245707_0004_113628075.jpg
     ...
+    page/                           # PAGE XML per page (same stem as image)
+      14245707_0003_113628074.xml
+      14245707_0004_113628075.xml
+    txt/                            # transcript per page (same stem as image)
+      14245707_0003_113628074.txt
+      14245707_0004_113628075.txt
 ```
-
-Document folders cancontain existing **.txt** transcripts and **.xml** (PAGE XML) files. If present — either `{folder_name}.txt` / `{folder_name}.xml` or a single .txt and single .xml in the folder — they are used as context to improve transcription and are copied to `output/imported/`.
-
-With no subfolders (flat layout), put images directly in `data/input/`; the document name will be the input folder name (e.g. `input`).
 
 **Output** (under `data/output/` or `--output`):
 
-- `imported/` — copied .txt/.xml from input
-- `transcribed/` — one .txt per document (full HTR)
+- `imported/{doc_name}/` — copied `txt/` and `page/` from the collection
+- `transcribed/` — one concatenated .txt per document plus per-page files: `transcribed/{doc_name}/{page_stem}.txt` (one per image); optional `transcribed/{doc_name}/page/` with PAGE XML
 - `metadata/` — one single-line CSV per analysed (image, transcript) pair; `metadata/combined.csv` is the merged table (language, category, date, etc.). Categories (Dutch): Petitie, Sollicitatie, Appostille/addendum, Rapport, Bijlage, Attest, Andere. To add a single image: use `ingest.annotate_and_write_metadata(image_path, transcript, output_dir, doc_name, page_id)`, then run `combine-metadata`.
 
 ## Docker + Ollama (Connection refused)
