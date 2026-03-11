@@ -7,7 +7,7 @@ RUN apt-get update && apt-get install -y \
     libgl1 libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
-COPY pyproject.toml .
+COPY pyproject.toml README.md ./
 COPY src/ src/
 
 # Install base deps. Add [gemini] extras if BACKEND=gemini is needed.

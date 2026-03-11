@@ -54,6 +54,16 @@ data/input/
     ...
 ```
 
+## Docker + Ollama (Connection refused)
+
+If you run the app **in Docker** with `BACKEND=ollama`, the container cannot reach `localhost:11434` (that’s the container itself). Point `OLLAMA_BASE_URL` at your host:
+
+- **Windows / Mac (Docker Desktop):** In `.env` set  
+  `OLLAMA_BASE_URL=http://host.docker.internal:11434`
+- **Linux:** Use `http://172.17.0.1:11434` or run the container with `network_mode: host` and keep `http://localhost:11434`.
+
+Alternatively use the Gemini backend: set `BACKEND=gemini` and `GEMINI_API_KEY` in `.env` (no local server needed).
+
 ## Configuration
 
 All settings via `.env` — see `.env.example`. Key options:

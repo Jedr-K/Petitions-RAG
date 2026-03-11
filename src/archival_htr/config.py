@@ -14,6 +14,9 @@ GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-pro")
 GEMINI_EMBEDDING_MODEL = os.getenv("GEMINI_EMBEDDING_MODEL", "models/text-embedding-004")
 
 # --- Ollama settings (used when BACKEND=ollama) ---
+# When running in Docker, use host hostname so the container can reach Ollama on the host:
+#   OLLAMA_BASE_URL=http://host.docker.internal:11434  (Windows/Mac Docker Desktop)
+#   OLLAMA_BASE_URL=http://172.17.0.1:11434             (Linux, or use host network)
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_VISION_MODEL = os.getenv("OLLAMA_VISION_MODEL", "qwen2.5vl")
 OLLAMA_EMBED_MODEL = os.getenv("OLLAMA_EMBED_MODEL", "nomic-embed-text")
