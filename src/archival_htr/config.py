@@ -22,9 +22,10 @@ OLLAMA_VISION_MODEL = os.getenv("OLLAMA_VISION_MODEL", "qwen2.5vl")
 OLLAMA_EMBED_MODEL = os.getenv("OLLAMA_EMBED_MODEL", "nomic-embed-text")
 
 # --- Shared settings ---
-DATA_INPUT_DIR = os.getenv("DATA_INPUT_DIR", "/data/input")
-DATA_OUTPUT_DIR = os.getenv("DATA_OUTPUT_DIR", "/data/output")
-CHROMA_DIR = os.getenv("CHROMA_DIR", "/data/chroma")
+# Defaults are project-relative so local runs work on Windows/Mac/Linux; override in .env or Docker to e.g. /data/input
+DATA_INPUT_DIR = os.getenv("DATA_INPUT_DIR", "data/input")
+DATA_OUTPUT_DIR = os.getenv("DATA_OUTPUT_DIR", "data/output")
+CHROMA_DIR = os.getenv("CHROMA_DIR", "data/chroma")
 
 CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "500"))       # words per RAG chunk
 CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "50"))  # word overlap between chunks
