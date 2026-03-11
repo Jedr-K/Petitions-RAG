@@ -1,10 +1,11 @@
+import csv
 import re
 from pathlib import Path
 import shutil
 from tqdm import tqdm
 from rich.console import Console
 from archival_htr import config
-from archival_htr.gemini_client import transcribe_image
+from archival_htr.llm_client import transcribe_image, annotate_metadata, DocumentMetadata
 
 console = Console()
 
@@ -12,6 +13,18 @@ SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".webp", ".bmp
 
 IMPORTED_SUBDIR = "imported"
 TRANSCRIBED_SUBDIR = "transcribed"
+METADATA_SUBDIR = "metadata"
+METADATA_COMBINED_FILENAME = "combined.csv"
+
+METADATA_CSV_COLUMNS = [
+    "source_doc",
+    "source_page",
+    "language",
+    "single_page_or_part",
+    "related_to_others",
+    "date_submission_writing",
+    "category",
+]
 
 
 def get_txt_path(folder: Path) -> Path | None:
@@ -135,11 +148,161 @@ def transcribe_document(doc_folder: Path, output_dir: Path, overwrite: bool = Fa
     return gemini_txt_path
 
 
+# ---------------------------------------------------------------------------
+# Metadata: one CSV per (image, transcript) pair, then combine
+# ---------------------------------------------------------------------------
+
+def _write_metadata_csv(
+    meta: DocumentMetadata,
+    output_path: Path,
+    source_doc: str,
+    source_page: str,
+) -> None:
+    """Write a single-line CSV (header + one row) for this metadata entry."""
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(output_path, "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(METADATA_CSV_COLUMNS)
+        w.writerow([
+            source_doc,
+            source_page,
+            meta.language,
+            meta.single_page_or_part,
+            meta.related_to_others,
+            meta.date_submission_writing,
+            meta.category,
+        ])
+
+
+def parse_transcribed_pages(txt_path: Path) -> list[tuple[str, str]]:
+    """
+    Parse a transcribed .txt file (format "--- page.name ---\\ntext") into
+    (page_name, transcript) pairs. Returns list of (page_name, text).
+    """
+    text = txt_path.read_text(encoding="utf-8")
+    # Split by page delimiter; each segment is "page.name ---\ntranscript"
+    segments = re.split(r"\n---\s+", text)
+    result = []
+    for seg in segments:
+        seg = seg.strip()
+        if not seg:
+            continue
+        if seg.startswith("--- "):
+            seg = seg[4:]
+        if " ---\n" in seg:
+            page_name, _, transcript = seg.partition(" ---\n")
+            result.append((page_name.strip(), transcript.strip()))
+        else:
+            lines = seg.split("\n", 1)
+            result.append((lines[0].strip(), lines[1].strip() if len(lines) > 1 else ""))
+    return result
+
+
+def annotate_and_write_metadata(
+    image_path: Path,
+    transcript: str,
+    output_dir: Path,
+    doc_name: str,
+    page_id: str,
+    overwrite: bool = False,
+) -> Path:
+    """
+    Run LLM metadata annotation for one (image, transcript) pair and write
+    a single-line CSV under output_dir/metadata/{doc_name}_{page_id}.csv.
+    Returns path to the written CSV. Use page_id = image_path.stem for one image.
+    """
+    metadata_dir = output_dir / METADATA_SUBDIR
+    safe_page_id = re.sub(r"[^\w\-.]", "_", page_id)
+    csv_path = metadata_dir / f"{doc_name}_{safe_page_id}.csv"
+    if csv_path.exists() and not overwrite:
+        console.print(f"[dim]Metadata exists[/dim] {csv_path.name}, skipping.")
+        return csv_path
+    meta = annotate_metadata(image_path, transcript)
+    _write_metadata_csv(meta, csv_path, source_doc=doc_name, source_page=page_id)
+    console.print(f"[green]Metadata[/green] → {csv_path}")
+    return csv_path
+
+
+def run_metadata_for_document(
+    doc_folder: Path,
+    output_dir: Path,
+    overwrite: bool = False,
+) -> list[Path]:
+    """
+    For each page in the document: load transcript from output_dir/transcribed/{doc_name}.txt,
+    run annotate_metadata(image, transcript), write one CSV to output_dir/metadata/.
+    Returns list of written CSV paths.
+    """
+    doc_name = doc_folder.name
+    transcribed_path = output_dir / TRANSCRIBED_SUBDIR / f"{doc_name}.txt"
+    if not transcribed_path.exists():
+        console.print(f"[yellow]No transcript[/yellow] for {doc_name}, skip metadata.")
+        return []
+    pages = get_pages(doc_folder)
+    if not pages:
+        return []
+    page_transcripts = {name: text for name, text in parse_transcribed_pages(transcribed_path)}
+    written = []
+    for page_path in tqdm(pages, desc=f"Metadata {doc_name}", unit="page"):
+        page_name = page_path.name
+        transcript = page_transcripts.get(page_name, "")
+        if not transcript:
+            console.print(f"[yellow]No transcript for page[/yellow] {page_name}, skipping.")
+            continue
+        try:
+            path = annotate_and_write_metadata(
+                page_path, transcript, output_dir, doc_name, page_path.stem, overwrite=overwrite
+            )
+            written.append(path)
+        except Exception as e:
+            console.print(f"[red]Error metadata {page_name}:[/red] {e}")
+    return written
+
+
+def combine_metadata_csvs(output_dir: Path) -> Path:
+    """
+    Merge all single-line CSVs in output_dir/metadata/ (excluding combined.csv)
+    into metadata/combined.csv. Each source CSV must have the same header.
+    Returns path to combined CSV.
+    """
+    metadata_dir = output_dir / METADATA_SUBDIR
+    combined_path = metadata_dir / METADATA_COMBINED_FILENAME
+    metadata_dir.mkdir(parents=True, exist_ok=True)
+    csv_files = sorted(
+        f for f in metadata_dir.glob("*.csv")
+        if f.name != METADATA_COMBINED_FILENAME
+    )
+    if not csv_files:
+        console.print("[yellow]No metadata CSVs to combine.[/yellow]")
+        with open(combined_path, "w", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            w.writerow(METADATA_CSV_COLUMNS)
+        return combined_path
+    rows = []
+    header = None
+    for f in csv_files:
+        with open(f, newline="", encoding="utf-8") as fp:
+            r = csv.reader(fp)
+            row_header = next(r, None)
+            if row_header and header is None:
+                header = row_header
+            for row in r:
+                if row and len(row) == len(METADATA_CSV_COLUMNS):
+                    rows.append(row)
+    with open(combined_path, "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(header or METADATA_CSV_COLUMNS)
+        w.writerows(rows)
+    console.print(f"[green]Combined[/green] → {combined_path} ({len(rows)} rows)")
+    return combined_path
+
+
 def ingest_all(
     input_dir: Path = None,
     output_dir: Path = None,
     overwrite: bool = False,
     doc_names: list[str] | None = None,
+    run_metadata: bool = True,
 ) -> list[Path]:
     input_dir = input_dir or Path(config.DATA_INPUT_DIR)
     output_dir = output_dir or Path(config.DATA_OUTPUT_DIR)
@@ -158,5 +321,10 @@ def ingest_all(
     for folder in doc_folders:
         path = transcribe_document(folder, output_dir, overwrite=overwrite)
         results.append(path)
+
+    if run_metadata:
+        for folder in doc_folders:
+            run_metadata_for_document(folder, output_dir, overwrite=overwrite)
+        combine_metadata_csvs(output_dir)
 
     return results

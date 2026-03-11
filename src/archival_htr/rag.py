@@ -3,7 +3,7 @@ from rich.console import Console
 import chromadb
 from chromadb.config import Settings
 from archival_htr import config  # In Python, when you import a module (or package), all of its public (non-underscore-prefixed) attributes, functions, and classes become accessible as attributes of that module object. There's no need for explicit exports like in JavaScript; everything defined at the top level of src/archival_htr/config.py (unless its name starts with _) is exposed as config.* here.
-from archival_htr.gemini_client import embed_text, embed_query
+from archival_htr.llm_client import embed_text, embed_query
 
 console = Console()
 
@@ -69,11 +69,13 @@ def index_document(txt_path: Path, overwrite: bool = False):
 
 def index_all(output_dir: Path = None, overwrite: bool = False):
     output_dir = output_dir or Path(config.DATA_OUTPUT_DIR)
-    gemini_dir = output_dir / "gemini"
+    gemini_dir = output_dir / "transcribed"
     if gemini_dir.is_dir():
         txt_files = sorted(gemini_dir.glob("*.txt"))
+        console.print(f"Searching in {gemini_dir} for .txt files...")
     else:
         txt_files = sorted(output_dir.glob("*.txt"))
+        console.print(f"Searching in {output_dir} for .txt files...")
     console.print(f"Found [bold]{len(txt_files)}[/bold] transcription(s) to index\n")
     for f in txt_files:
         index_document(f, overwrite=overwrite)

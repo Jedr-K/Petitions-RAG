@@ -18,10 +18,17 @@ def transcribe(
     output_dir: Path = typer.Option(None, "--output", "-o", help="Where to write .txt files"),
     overwrite: bool = typer.Option(False, "--overwrite", help="Re-transcribe already-done docs"),
     doc: list[str] = typer.Option([], "--doc", "-d", help="Process only these subfolder names; omit for all"),
+    no_metadata: bool = typer.Option(False, "--no-metadata", help="Skip metadata annotation and combine step"),
 ):
     """Transcribe manuscript images to .txt. Use --doc to limit to specific documents."""
     from archival_htr.ingest import ingest_all
-    ingest_all(input_dir=input_dir, output_dir=output_dir, overwrite=overwrite, doc_names=doc or None)
+    ingest_all(
+        input_dir=input_dir,
+        output_dir=output_dir,
+        overwrite=overwrite,
+        doc_names=doc or None,
+        run_metadata=not no_metadata,
+    )
 
 
 @app.command()
@@ -40,13 +47,53 @@ def ingest(
     output_dir: Path = typer.Option(None, "--output", "-o"),
     overwrite: bool = typer.Option(False, "--overwrite"),
     doc: list[str] = typer.Option([], "--doc", "-d", help="Process only these subfolder names; omit for all"),
+    no_metadata: bool = typer.Option(False, "--no-metadata", help="Skip metadata annotation and combine step"),
 ):
-    """Run transcribe + index in one step. Use --doc to limit to specific documents."""
+    """Run transcribe + metadata + index in one step. Use --doc to limit to specific documents."""
     from archival_htr.ingest import ingest_all
     from archival_htr.rag import index_all
-    paths = ingest_all(input_dir=input_dir, output_dir=output_dir, overwrite=overwrite, doc_names=doc or None)
+    paths = ingest_all(
+        input_dir=input_dir,
+        output_dir=output_dir,
+        overwrite=overwrite,
+        doc_names=doc or None,
+        run_metadata=not no_metadata,
+    )
     if paths:
         index_all(output_dir=output_dir or paths[0].parent.parent, overwrite=overwrite)
+
+
+@app.command()
+def metadata(
+    input_dir: Path = typer.Option(None, "--input", "-i", help="Folder of document subfolders (for page images)"),
+    output_dir: Path = typer.Option(None, "--output", "-o", help="Folder containing transcribed/ and metadata/"),
+    overwrite: bool = typer.Option(False, "--overwrite", help="Re-annotate and overwrite existing metadata CSVs"),
+    doc: list[str] = typer.Option([], "--doc", "-d", help="Process only these document names; omit for all"),
+):
+    """Run metadata annotation for all transcribed docs, then combine into one CSV."""
+    from archival_htr import config
+    from archival_htr.ingest import get_document_folders, run_metadata_for_document, combine_metadata_csvs
+
+    input_dir = input_dir or Path(config.DATA_INPUT_DIR)
+    output_dir = output_dir or Path(config.DATA_OUTPUT_DIR)
+    doc_folders = get_document_folders(input_dir)
+    if doc:
+        doc_folders = [f for f in doc_folders if f.name in doc]
+    for folder in doc_folders:
+        run_metadata_for_document(folder, output_dir, overwrite=overwrite)
+    combine_metadata_csvs(output_dir)
+
+
+@app.command()
+def combine_metadata(
+    output_dir: Path = typer.Option(None, "--output", "-o", help="Folder containing metadata/"),
+):
+    """Merge all single-line metadata CSVs in output/metadata/ into metadata/combined.csv."""
+    from archival_htr import config
+    from archival_htr.ingest import combine_metadata_csvs
+
+    output_dir = output_dir or Path(config.DATA_OUTPUT_DIR)
+    combine_metadata_csvs(output_dir)
 
 
 @app.command()
