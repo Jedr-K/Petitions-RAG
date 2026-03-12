@@ -51,6 +51,7 @@ HTR_IMPROVE_PROMPT = os.getenv(
         "use the additional files (txt and xml) to resolve ambiguities, fix obvious errors, and preserve consistent spelling. "
         "Preserve original spelling and line breaks where appropriate. If a word is illegible, mark as [illegible]. "
         "Output only the transcription for this image — no commentary or headings."
+        "If the image seems to contain several pages on top of each other, transcribe the top page only."
     ),
 )
 

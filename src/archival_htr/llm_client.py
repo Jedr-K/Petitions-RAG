@@ -123,7 +123,7 @@ def _metadata_prompt(transcript: str) -> str:
 From the image and transcript, infer the following and respond with a single JSON object only (no markdown, no explanation):
 
 - "language": Primary language of the source (e.g. Dutch, French, Latin). Use "unknown" if unclear.
-- "single_page_or_part": Either "single_page" if this appears to be a complete standalone document, or "part_of_larger" with a brief note (e.g. "part_of_larger (continuation of petition)").
+- "single_page_or_part": Either "single_page" if this appears to be a complete standalone document, or "part_of_larger" with a brief note (e.g. "part_of_larger (continuation of petition)"). You can infer this from the content of the transcript.
 - "related_to_others": Brief note on how this document might relate to others in the same corpus (e.g. cover letter for a petition, attachment to a report). Use "unknown" if no clear relation.
 - "date_submission_writing": Inferred date of submission or writing (year or range, e.g. "1789", "ca. 1790-1795"). Use "unknown" if not inferrable.
 - "category": Exactly one of: {categories_str}
