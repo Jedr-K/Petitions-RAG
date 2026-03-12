@@ -17,20 +17,24 @@ def _get_client() -> chromadb.ClientAPI:
 
 def _get_collection(client: chromadb.ClientAPI):
     return client.get_or_create_collection(
-        name="manuscripts",
+        name=config.COLLECTION_NAME,
         metadata={"hnsw:space": "cosine"},
     )
 
 
 def _chunk_text(text: str, chunk_size: int, overlap: int) -> list[str]:
     words = text.split()
+    if not words:
+        return []
+    step = max(1, chunk_size - overlap)  # guard against zero/negative step
     chunks = []
     start = 0
     while start < len(words):
         end = start + chunk_size
         chunk = " ".join(words[start:end])
-        chunks.append(chunk)
-        start += chunk_size - overlap
+        if chunk:
+            chunks.append(chunk)
+        start += step
     return chunks
 
 
@@ -81,8 +85,14 @@ def index_all(output_dir: Path = None, overwrite: bool = False):
         index_document(f, overwrite=overwrite)
 
 
-def search(query: str, n_results: int = 5) -> list[dict]:
-    """Search the corpus. Returns ranked list of result dicts."""
+def search(query: str, n_results: int = 5, source: str | None = None) -> list[dict]:
+    """Search the corpus. Returns ranked list of result dicts.
+
+    Args:
+        query: Natural language search query.
+        n_results: Maximum number of results to return.
+        source: If set, restrict results to chunks from this document (stem name).
+    """
     client = _get_client()
     collection = _get_collection(client)
 
@@ -90,6 +100,7 @@ def search(query: str, n_results: int = 5) -> list[dict]:
     results = collection.query(
         query_embeddings=[query_embedding],
         n_results=n_results,
+        where={"source": source} if source else None,
         include=["documents", "metadatas", "distances"],
     )
 

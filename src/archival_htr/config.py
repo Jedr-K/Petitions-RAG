@@ -30,6 +30,8 @@ CHROMA_DIR = os.getenv("CHROMA_DIR", "data/chroma")
 CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "500"))       # words per RAG chunk
 CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "50"))  # word overlap between chunks
 
+COLLECTION_NAME = os.getenv("COLLECTION_NAME", "manuscripts")  # ChromaDB collection name
+
 HTR_PROMPT = os.getenv(
     "HTR_PROMPT",
     (
@@ -56,9 +58,13 @@ HTR_IMPROVE_PROMPT = os.getenv(
 )
 
 def validate_config():
+    if BACKEND not in ("gemini", "ollama"):
+        raise EnvironmentError(f"Unknown BACKEND='{BACKEND}'. Must be 'gemini' or 'ollama'.")
     if BACKEND == "gemini" and not GEMINI_API_KEY:
         raise EnvironmentError(
             "GEMINI_API_KEY is not set. Add it to your .env file, or set BACKEND=ollama for fully local inference."
         )
-    if BACKEND not in ("gemini", "ollama"):
-        raise EnvironmentError(f"Unknown BACKEND='{BACKEND}'. Must be 'gemini' or 'ollama'.")
+    if CHUNK_OVERLAP >= CHUNK_SIZE:
+        raise EnvironmentError(
+            f"CHUNK_OVERLAP ({CHUNK_OVERLAP}) must be less than CHUNK_SIZE ({CHUNK_SIZE})."
+        )

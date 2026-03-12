@@ -1,0 +1,11 @@
+# Production overrides — use with:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml run archival-htr <command>
+#
+# Differences from the default compose:
+#   - No ./src volume mount (uses the package installed inside the image)
+services:
+  archival-htr:
+    volumes:
+      - ./data/input:/data/input
+      - ./data/output:/data/output
+      - chroma_store:/data/chroma

@@ -12,6 +12,7 @@ Public API (identical regardless of backend):
 import base64
 import json
 import re
+import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
@@ -47,15 +48,56 @@ def _image_to_base64(image_path: Path) -> tuple[str, str]:
     return data, mime_type
 
 
+_ollama_validated = False
+
+
+def check_ollama() -> None:
+    """Verify Ollama is reachable and the configured models are available.
+
+    Raises ConnectionError if Ollama is not running, or EnvironmentError if a
+    required model has not been pulled yet.
+    """
+    global _ollama_validated
+    if _ollama_validated:
+        return
+    try:
+        req = urllib.request.Request(f"{config.OLLAMA_BASE_URL}/api/tags")
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.URLError as e:
+        raise ConnectionError(
+            f"Cannot reach Ollama at {config.OLLAMA_BASE_URL}. "
+            "Is Ollama running? For Docker Desktop set "
+            "OLLAMA_BASE_URL=http://host.docker.internal:11434 in your .env file. "
+            f"Original error: {e}"
+        ) from e
+
+    available = {m["name"].split(":")[0] for m in data.get("models", [])}
+    for model_name in (config.OLLAMA_VISION_MODEL, config.OLLAMA_EMBED_MODEL):
+        base = model_name.split(":")[0]
+        if base not in available:
+            raise EnvironmentError(
+                f"Ollama model '{model_name}' is not available. "
+                f"Pull it first with:  ollama pull {model_name}"
+            )
+    _ollama_validated = True
+
+
 def _ollama_post(endpoint: str, payload: dict) -> dict:
     """POST JSON to Ollama and return parsed response."""
+    check_ollama()
     url = f"{config.OLLAMA_BASE_URL}{endpoint}"
     body = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
         url, data=body, headers={"Content-Type": "application/json"}, method="POST"
     )
-    with urllib.request.urlopen(req) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+    try:
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.URLError as e:
+        raise ConnectionError(
+            f"Ollama request to {url} failed: {e}"
+        ) from e
 
 
 # ---------------------------------------------------------------------------
@@ -204,7 +246,17 @@ def _parse_metadata_response(raw: str) -> DocumentMetadata:
     if raw.startswith("```"):
         raw = re.sub(r"^```(?:json)?\s*", "", raw)
         raw = re.sub(r"\s*```$", "", raw)
-    data = json.loads(raw)
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        # Return safe defaults rather than crashing when LLM returns non-JSON
+        return DocumentMetadata(
+            language="unknown",
+            single_page_or_part="unknown",
+            related_to_others="unknown",
+            date_submission_writing="unknown",
+            category="Andere",
+        )
     category = data.get("category", "Andere")
     if category not in METADATA_CATEGORIES:
         category = "Andere"
@@ -241,6 +293,9 @@ def _annotate_metadata_ollama(image_path: Path, transcript: str) -> DocumentMeta
 
 def _enhance_metadata_gemini(transcript: str, metadata: str) -> DocumentMetadata:
     import google.generativeai as genai
+
+    genai.configure(api_key=config.GEMINI_API_KEY)
+    model = genai.GenerativeModel(config.GEMINI_MODEL)
     response = model.generate_content([enhance_metadata_prompt(transcript), metadata])
     return _parse_metadata_response(response.text.strip())
 
