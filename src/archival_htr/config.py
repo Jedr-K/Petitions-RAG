@@ -11,7 +11,7 @@ BACKEND = os.getenv("BACKEND", "ollama")
 # --- Gemini settings (used when BACKEND=gemini) ---
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-pro")
-GEMINI_EMBEDDING_MODEL = os.getenv("GEMINI_EMBEDDING_MODEL", "models/text-embedding-004")
+GEMINI_EMBEDDING_MODEL = os.getenv("GEMINI_EMBEDDING_MODEL", "models/gemini-embedding-001")
 
 # --- Ollama settings (used when BACKEND=ollama) ---
 # When running in Docker, use host hostname so the container can reach Ollama on the host:
