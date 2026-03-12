@@ -101,6 +101,57 @@ def transcribe_image(image_path: Path, existing_context: str = "") -> str:
 
 
 # ---------------------------------------------------------------------------
+# Text-only query (context + question → answer)
+# ---------------------------------------------------------------------------
+
+def _query_gemini(context: str, query: str) -> str:
+    import google.generativeai as genai
+
+    genai.configure(api_key=config.GEMINI_API_KEY)
+    model = genai.GenerativeModel(config.GEMINI_MODEL)
+    prompt = f"""You are an expert in historical manuscripts. Below is a full transcription (or set of transcriptions) from a single collection.
+
+Use only the provided text to answer the question. Quote or cite the relevant passages when possible. If the answer is not in the text, say so.
+
+---
+TRANSCRIPTION:
+{context}
+---
+
+Question: {query}"""
+    response = model.generate_content(prompt)
+    return response.text.strip()
+
+
+def _query_ollama(context: str, query: str) -> str:
+    prompt = f"""You are an expert in historical manuscripts. Below is a full transcription (or set of transcriptions) from a single collection.
+
+Use only the provided text to answer the question. Quote or cite the relevant passages when possible. If the answer is not in the text, say so.
+
+---
+TRANSCRIPTION:
+{context}
+---
+
+Question: {query}"""
+    payload = {
+        "model": config.OLLAMA_VISION_MODEL,
+        "prompt": prompt,
+        "stream": False,
+    }
+    result = _ollama_post("/api/generate", payload)
+    return result["response"].strip()
+
+
+def query_with_context(context: str, query: str) -> str:
+    """Answer a question using the given transcript text as context. No image."""
+    config.validate_config()
+    if config.BACKEND == "gemini":
+        return _query_gemini(context, query)
+    return _query_ollama(context, query)
+
+
+# ---------------------------------------------------------------------------
 # Metadata annotation (image + transcript → structured metadata)
 # ---------------------------------------------------------------------------
 
@@ -134,6 +185,16 @@ Transcription (for context):
 ---
 
 Respond with only the JSON object."""
+
+
+def enhance_metadata_prompt(transcript: str) -> str:
+    categories_str = ", ".join(METADATA_CATEGORIES)
+    return f""" using the provided .txt file containing the transcript and the .csv file containing the current metadata, 
+    enhance the csv string by reading the transcript and deducting if this 
+    1) is a complete text -> single or multiple page
+    2) what type of document this is. Use one of the following categories: {categories_str}
+    3) the date of submission or writing
+    Return the enhanced csv string."""
 
 
 def _parse_metadata_response(raw: str) -> DocumentMetadata:
@@ -178,6 +239,19 @@ def _annotate_metadata_ollama(image_path: Path, transcript: str) -> DocumentMeta
     result = _ollama_post("/api/generate", payload)
     return _parse_metadata_response(result["response"].strip())
 
+def _enhance_metadata_gemini(transcript: str, metadata: str) -> DocumentMetadata:
+    import google.generativeai as genai
+    response = model.generate_content([enhance_metadata_prompt(transcript), metadata])
+    return _parse_metadata_response(response.text.strip())
+
+def _enhance_metadata_ollama(transcript: str, metadata: str) -> DocumentMetadata:
+    payload = {
+        "model": config.OLLAMA_VISION_MODEL,
+        "prompt": enhance_metadata_prompt(transcript),
+        "input": metadata,
+    }
+    result = _ollama_post("/api/generate", payload)
+    return _parse_metadata_response(result["response"].strip()) 
 
 def annotate_metadata(image_path: Path, transcript: str) -> DocumentMetadata:
     """Generate annotated metadata from an image and its refined HTR transcript."""
@@ -186,6 +260,12 @@ def annotate_metadata(image_path: Path, transcript: str) -> DocumentMetadata:
         return _annotate_metadata_gemini(image_path, transcript)
     return _annotate_metadata_ollama(image_path, transcript)
 
+def enhance_metadata(transcript: str, metadata: str) -> DocumentMetadata:
+    """Enhance the metadata by reading the transcript and the current metadata."""
+    config.validate_config()
+    if config.BACKEND == "gemini":
+        return _enhance_metadata_gemini(transcript, metadata)
+    return _enhance_metadata_ollama(transcript, metadata)
 
 # ---------------------------------------------------------------------------
 # Embeddings

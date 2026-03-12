@@ -106,12 +106,16 @@ def combine_metadata(
 def search(
     query: str = typer.Argument(..., help="Search query"),
     n: int = typer.Option(5, "--results", "-n", help="Number of results to return"),
+    source: str | None = typer.Option(None, "--source", "-s", help="Limit to one document/collection (e.g. 14)"),
 ):
     """Search the indexed manuscript corpus."""
     from archival_htr.rag import search as rag_search
 
+    n_results = n if n > 0 else 100  # -1 or 0 → cap at 100 for 'all in collection'
     console.print(f"\n[bold]Searching for:[/bold] {query}\n")
-    results = rag_search(query, n_results=n)
+    if source:
+        console.print(f"[dim]Filtering to source: {source}[/dim]\n")
+    results = rag_search(query, n_results=n_results, source=source)
 
     if not results:
         console.print("[yellow]No results found.[/yellow]")
@@ -128,6 +132,39 @@ def search(
         table.add_row(str(i), r["source"], str(r["score"]), excerpt)
 
     console.print(table)
+
+
+@app.command()
+def query(
+    question: str = typer.Argument(..., help="Question to ask about the transcript"),
+    source: str = typer.Option(..., "--source", "-s", help="Collection id (e.g. 14) whose transcript to use"),
+    output_dir: Path = typer.Option(None, "--output", "-o", help="Folder containing transcribed/"),
+):
+    """Put the full transcript for one collection in context and ask the model. No RAG."""
+    from archival_htr import config
+    from archival_htr.llm_client import query_with_context
+
+    out = output_dir or Path(config.DATA_OUTPUT_DIR)
+    transcribed_dir = out / "transcribed"
+    combined = transcribed_dir / f"{source}.txt"
+    if combined.exists():
+        context = combined.read_text(encoding="utf-8")
+        console.print(f"[dim]Loaded[/dim] {combined} ({len(context):,} chars)\n")
+    else:
+        subdir = transcribed_dir / source
+        if not subdir.is_dir():
+            console.print(f"[red]No transcript found for source '{source}'[/red] (looked for {combined} or {subdir}/)")
+            raise typer.Exit(1)
+        parts = sorted(subdir.glob("*.txt"))
+        if not parts:
+            console.print(f"[red]No .txt files in[/red] {subdir}")
+            raise typer.Exit(1)
+        context = "\n\n".join(f.read_text(encoding="utf-8") for f in parts)
+        console.print(f"[dim]Loaded[/dim] {len(parts)} files from {subdir} ({len(context):,} chars)\n")
+
+    console.print("[bold]Question:[/bold]", question, "\n")
+    answer = query_with_context(context, question)
+    console.print("[bold]Answer:[/bold]\n", answer)
 
 
 if __name__ == "__main__":
