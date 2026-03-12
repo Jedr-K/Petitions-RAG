@@ -144,6 +144,50 @@ def search(
 
 
 @app.command()
+def ask(
+    question: str = typer.Argument(..., help="Natural-language question about the corpus"),
+    n: int = typer.Option(8, "--chunks", "-n", help="Number of retrieved passages to use as context"),
+    source: str | None = typer.Option(None, "--source", "-s", help="Limit retrieval to one document/collection"),
+    job_application: bool | None = typer.Option(None, "--job-application/--no-job-application", help="Filter to job-application petitions only"),
+    military_service: bool | None = typer.Option(None, "--military-service/--no-military-service", help="Filter to documents citing military service"),
+):
+    """Ask a natural-language question about the corpus.
+
+    Retrieves the most relevant passages via semantic search, then passes them
+    as context to the LLM which synthesises a sourced answer.
+    """
+    from archival_htr.rag import search as rag_search
+    from archival_htr.llm_client import query_with_context
+
+    # 1. Retrieve relevant chunks
+    chunks = rag_search(
+        question,
+        n_results=n,
+        source=source,
+        job_application=job_application,
+        military_service=military_service,
+    )
+    if not chunks:
+        console.print("[yellow]No relevant passages found in the corpus.[/yellow]")
+        raise typer.Exit()
+
+    # 2. Build labelled context string
+    context_parts = [f"[Source: {r['source']}]\n{r['text']}" for r in chunks]
+    context = "\n\n---\n\n".join(context_parts)
+    sources_used = sorted({r["source"] for r in chunks})
+
+    console.print(f"\n[bold]Question:[/bold] {question}")
+    console.print(f"[dim]Using {len(chunks)} passage(s) from: {', '.join(sources_used)}[/dim]\n")
+
+    # 3. Synthesise answer
+    answer = query_with_context(context, question)
+
+    console.print("[bold]Answer:[/bold]\n")
+    console.print(answer)
+    console.print(f"\n[dim]Sources consulted: {', '.join(sources_used)}[/dim]")
+
+
+@app.command()
 def reclassify(
     output_dir: Path = typer.Option(None, "--output", "-o", help="Folder containing transcribed/ and metadata/"),
     doc: list[str] = typer.Option([], "--doc", "-d", help="Process only these document names; omit for all"),
