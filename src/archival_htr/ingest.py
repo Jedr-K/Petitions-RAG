@@ -1,5 +1,6 @@
 import csv
 import re
+import xml.etree.ElementTree as ET
 from pathlib import Path
 import shutil
 from tqdm import tqdm
@@ -47,10 +48,22 @@ def get_xml_path(folder: Path) -> Path | None:
 
 def extract_text_from_page_xml(xml_path: Path) -> str:
     """Extract line text from PAGE XML (all <TextEquiv><Unicode>...</Unicode></TextEquiv>)."""
-    text = xml_path.read_text(encoding="utf-8")
-    # PAGE uses namespaces; match Unicode content (may span lines)
-    parts = re.findall(r"<Unicode>([^<]*)</Unicode>", text, re.DOTALL)
-    return "\n".join(p.strip() for p in parts if p.strip())
+    try:
+        tree = ET.parse(xml_path)
+        root = tree.getroot()
+        # PAGE XML declares a namespace like {http://schema.primaresearch.org/PAGE/...}
+        ns = root.tag.split("}")[0] + "}" if root.tag.startswith("{") else ""
+        parts = [
+            elem.text.strip()
+            for elem in root.iter(f"{ns}Unicode")
+            if elem.text and elem.text.strip()
+        ]
+        return "\n".join(parts)
+    except ET.ParseError as e:
+        console.print(f"[yellow]Warning: Could not parse XML {xml_path.name}: {e}. Falling back to regex.[/yellow]")
+        text = xml_path.read_text(encoding="utf-8")
+        parts = re.findall(r"<Unicode>(.*?)</Unicode>", text, re.DOTALL)
+        return "\n".join(p.strip() for p in parts if p.strip())
 
 
 def get_document_folders(input_dir: Path) -> list[Path]:
@@ -157,9 +170,11 @@ def transcribe_document(
             text = transcribe_image(page, existing_context=existing_context)
             _write_single_page_txt(text, page, gemini_dir, doc_name)
             page_to_text[page.name] = text
+        except KeyboardInterrupt:
+            raise
         except Exception as e:
             console.print(f"[red]Error on {page.name}:[/red] {e}")
-            page_to_text[page.name] = f"[transcription error: {e}]"
+            page_to_text[page.name] = ""
 
     gemini_dir.mkdir(parents=True, exist_ok=True)
     # Write combined file in document page order
