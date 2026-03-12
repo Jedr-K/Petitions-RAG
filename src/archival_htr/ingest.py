@@ -100,10 +100,24 @@ def _build_existing_context(doc_folder: Path) -> str:
     return "\n\n".join(parts) if parts else ""
 
 
-def transcribe_document(doc_folder: Path, output_dir: Path, overwrite: bool = False) -> Path:
+def _write_single_page_txt(text: str, page: Path, gemini_dir: Path, doc_name: str) -> None:
+    """Write one .txt file per transcribed page under gemini_dir/{doc_name}/{page.stem}.txt."""
+    console.print(f"[green]Writing[/green] → {gemini_dir / f'{doc_name}/{page.stem}.txt'}")
+    out_dir = gemini_dir / doc_name
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / f"{page.stem}.txt").write_text(text, encoding="utf-8")
+
+
+def transcribe_document(
+    doc_folder: Path,
+    output_dir: Path,
+    overwrite: bool = False,
+    page_stems: set[str] | None = None,
+) -> Path:
     """
     Copy imported .txt/.xml to output_dir/imported/; transcribe with Gemini (using existing
-    material as context) and save to output_dir/gemini/{doc_name}.txt. Returns path to Gemini .txt.
+    material as context) and save to output_dir/transcribed/{doc_name}.txt. Returns path to that .txt.
+    If page_stems is set, only those pages (by image stem) are transcribed and merged into the existing file.
     """
     doc_name = doc_folder.name
     imported_dir = output_dir / IMPORTED_SUBDIR
@@ -112,31 +126,44 @@ def transcribe_document(doc_folder: Path, output_dir: Path, overwrite: bool = Fa
 
     _copy_imported_to(doc_folder, doc_name, imported_dir)
 
-    if gemini_txt_path.exists() and not overwrite:
-        console.print(f"[yellow]Skipping[/yellow] {doc_name} (already transcribed, use --overwrite to redo)")
-        return gemini_txt_path
-
-    pages = get_pages(doc_folder)
-    if not pages:
+    all_pages = get_pages(doc_folder)
+    if not all_pages:
         console.print(f"[red]No images found[/red] in {doc_folder}")
         return gemini_txt_path
 
+    if page_stems:
+        pages = [p for p in all_pages if p.stem in page_stems]
+        if not pages:
+            console.print(f"[yellow]No matching pages for stems[/yellow] {page_stems} in {doc_name}")
+            return gemini_txt_path
+    else:
+        pages = all_pages
+        if gemini_txt_path.exists() and not overwrite:
+            console.print(f"[yellow]Skipping[/yellow] {doc_name} (already transcribed, use --overwrite to redo)")
+            return gemini_txt_path
+
     existing_context = _build_existing_context(doc_folder)
     if existing_context:
-        console.print(f"[bold cyan]Transcribing[/bold cyan] {doc_name} ({len(pages)} pages) [with existing .txt/.xml context]")
+        console.print(f"[bold cyan]Transcribing[/bold cyan] {doc_name} ({len(pages)} page(s)) [with existing .txt/.xml context]")
     else:
-        console.print(f"[bold cyan]Transcribing[/bold cyan] {doc_name} ({len(pages)} pages)")
+        console.print(f"[bold cyan]Transcribing[/bold cyan] {doc_name} ({len(pages)} page(s))")
 
-    full_text_parts = []
+    # Load existing combined transcript when doing partial update
+    page_to_text: dict[str, str] = {}
+    if page_stems and gemini_txt_path.exists():
+        page_to_text = dict(parse_transcribed_pages(gemini_txt_path))
     for page in tqdm(pages, desc=doc_name, unit="page"):
         try:
             text = transcribe_image(page, existing_context=existing_context)
-            full_text_parts.append(f"--- {page.name} ---\n{text}")
+            _write_single_page_txt(text, page, gemini_dir, doc_name)
+            page_to_text[page.name] = text
         except Exception as e:
             console.print(f"[red]Error on {page.name}:[/red] {e}")
-            full_text_parts.append(f"--- {page.name} ---\n[transcription error: {e}]")
+            page_to_text[page.name] = f"[transcription error: {e}]"
 
     gemini_dir.mkdir(parents=True, exist_ok=True)
+    # Write combined file in document page order
+    full_text_parts = [f"--- {p.name} ---\n{page_to_text.get(p.name, '')}" for p in all_pages]
     gemini_txt_path.write_text("\n\n".join(full_text_parts), encoding="utf-8")
     console.print(f"[green]Saved[/green] → {gemini_txt_path}")
 
@@ -227,11 +254,12 @@ def run_metadata_for_document(
     doc_folder: Path,
     output_dir: Path,
     overwrite: bool = False,
+    page_stems: set[str] | None = None,
 ) -> list[Path]:
     """
     For each page in the document: load transcript from output_dir/transcribed/{doc_name}.txt,
     run annotate_metadata(image, transcript), write one CSV to output_dir/metadata/.
-    Returns list of written CSV paths.
+    If page_stems is set, only those pages are annotated. Returns list of written CSV paths.
     """
     doc_name = doc_folder.name
     transcribed_path = output_dir / TRANSCRIBED_SUBDIR / f"{doc_name}.txt"
@@ -241,6 +269,10 @@ def run_metadata_for_document(
     pages = get_pages(doc_folder)
     if not pages:
         return []
+    if page_stems:
+        pages = [p for p in pages if p.stem in page_stems]
+        if not pages:
+            return []
     page_transcripts = {name: text for name, text in parse_transcribed_pages(transcribed_path)}
     written = []
     for page_path in tqdm(pages, desc=f"Metadata {doc_name}", unit="page"):
@@ -302,6 +334,7 @@ def ingest_all(
     output_dir: Path = None,
     overwrite: bool = False,
     doc_names: list[str] | None = None,
+    page_stems: list[str] | None = None,
     run_metadata: bool = True,
 ) -> list[Path]:
     input_dir = input_dir or Path(config.DATA_INPUT_DIR)
@@ -317,14 +350,18 @@ def ingest_all(
     else:
         console.print(f"Found [bold]{len(doc_folders)}[/bold] document(s) in {input_dir}\n")
 
+    page_set = set(page_stems) if page_stems else None
+    if page_set:
+        console.print(f"Limiting to page(s): [bold]{', '.join(sorted(page_set))}[/bold]\n")
+
     results = []
     for folder in doc_folders:
-        path = transcribe_document(folder, output_dir, overwrite=overwrite)
+        path = transcribe_document(folder, output_dir, overwrite=overwrite, page_stems=page_set)
         results.append(path)
 
     if run_metadata:
         for folder in doc_folders:
-            run_metadata_for_document(folder, output_dir, overwrite=overwrite)
+            run_metadata_for_document(folder, output_dir, overwrite=overwrite, page_stems=page_set)
         combine_metadata_csvs(output_dir)
 
     return results
