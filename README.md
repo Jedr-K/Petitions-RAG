@@ -67,6 +67,8 @@ data/input/
     txt/                            # transcript per page (same stem as image)
       14245707_0003_113628074.txt
       14245707_0004_113628075.txt
+  14/
+    ...
 ```
 
 **Output** (under `data/output/` or `--output`):
