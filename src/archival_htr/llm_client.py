@@ -194,6 +194,76 @@ def query_with_context(context: str, query: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Document classification (transcript → job application + military service flags)
+# ---------------------------------------------------------------------------
+
+def _classification_prompt(transcript: str) -> str:
+    return f"""You are an expert archivist analysing a historical Dutch-language document transcription.
+
+Based ONLY on the transcript below, answer two questions and respond with a single JSON object only (no markdown, no explanation):
+
+- "is_job_application": true if this document is a petition or request explicitly seeking a specific position, office, job, or appointment. false if it is a general petition, report, attachment, or other document type.
+- "military_service_argument": true if prior military service — of the petitioner or a family member — is cited as a supporting argument or qualification for the request. false otherwise.
+- "reasoning": one sentence in English explaining your classification decision.
+
+Transcript:
+---
+{transcript[:12000]}
+---
+
+Respond with only the JSON object."""
+
+
+def _parse_classification_response(raw: str) -> dict:
+    raw = raw.strip()
+    if raw.startswith("```"):
+        raw = re.sub(r"^```(?:json)?\s*", "", raw)
+        raw = re.sub(r"\s*```$", "", raw)
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return {"is_job_application": False, "military_service_argument": False, "reasoning": "parse error"}
+    return {
+        "is_job_application": bool(data.get("is_job_application", False)),
+        "military_service_argument": bool(data.get("military_service_argument", False)),
+        "reasoning": str(data.get("reasoning", "")),
+    }
+
+
+def _classify_gemini(transcript: str) -> dict:
+    import google.generativeai as genai
+
+    genai.configure(api_key=config.GEMINI_API_KEY)
+    model = genai.GenerativeModel(config.GEMINI_MODEL)
+    response = model.generate_content(_classification_prompt(transcript))
+    return _parse_classification_response(response.text.strip())
+
+
+def _classify_ollama(transcript: str) -> dict:
+    payload = {
+        "model": config.OLLAMA_VISION_MODEL,
+        "prompt": _classification_prompt(transcript),
+        "stream": False,
+    }
+    result = _ollama_post("/api/generate", payload)
+    return _parse_classification_response(result["response"].strip())
+
+
+def classify_document(transcript: str) -> dict:
+    """Classify a document from its transcript text only (no image required).
+
+    Returns a dict with keys:
+        is_job_application (bool)
+        military_service_argument (bool)
+        reasoning (str)
+    """
+    config.validate_config()
+    if config.BACKEND == "gemini":
+        return _classify_gemini(transcript)
+    return _classify_ollama(transcript)
+
+
+# ---------------------------------------------------------------------------
 # Metadata annotation (image + transcript → structured metadata)
 # ---------------------------------------------------------------------------
 
@@ -205,6 +275,8 @@ class DocumentMetadata:
     related_to_others: str    # relation to other documents in corpus
     date_submission_writing: str
     category: str             # one of METADATA_CATEGORIES
+    is_job_application: bool = False          # petition explicitly requesting a position/office
+    military_service_argument: bool = False   # prior military service cited as a qualification
 
 
 def _metadata_prompt(transcript: str) -> str:
@@ -220,6 +292,8 @@ From the image and transcript, infer the following and respond with a single JSO
 - "related_to_others": Brief note on how this document might relate to others in the same corpus (e.g. cover letter for a petition, attachment to a report). Use "unknown" if no clear relation.
 - "date_submission_writing": Inferred date of submission or writing (year or range, e.g. "1789", "ca. 1790-1795"). Use "unknown" if not inferrable.
 - "category": Exactly one of: {categories_str}
+- "is_job_application": true if this document is a petition or request explicitly seeking a specific position, office, job, or appointment. false otherwise.
+- "military_service_argument": true if prior military service — of the petitioner or a family member — is cited as a supporting argument or qualification for the request. false otherwise.
 
 Transcription (for context):
 ---
@@ -266,6 +340,8 @@ def _parse_metadata_response(raw: str) -> DocumentMetadata:
         related_to_others=data.get("related_to_others", "unknown"),
         date_submission_writing=data.get("date_submission_writing", "unknown"),
         category=category,
+        is_job_application=bool(data.get("is_job_application", False)),
+        military_service_argument=bool(data.get("military_service_argument", False)),
     )
 
 

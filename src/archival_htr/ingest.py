@@ -25,6 +25,8 @@ METADATA_CSV_COLUMNS = [
     "related_to_others",
     "date_submission_writing",
     "category",
+    "is_job_application",
+    "military_service_argument",
 ]
 
 
@@ -213,6 +215,8 @@ def _write_metadata_csv(
             meta.related_to_others,
             meta.date_submission_writing,
             meta.category,
+            str(meta.is_job_application).lower(),
+            str(meta.military_service_argument).lower(),
         ])
 
 

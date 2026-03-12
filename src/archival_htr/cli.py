@@ -107,15 +107,24 @@ def search(
     query: str = typer.Argument(..., help="Search query"),
     n: int = typer.Option(5, "--results", "-n", help="Number of results to return"),
     source: str | None = typer.Option(None, "--source", "-s", help="Limit to one document/collection (e.g. 14)"),
+    job_application: bool | None = typer.Option(None, "--job-application/--no-job-application", help="Filter to job-application petitions only (or exclude them)"),
+    military_service: bool | None = typer.Option(None, "--military-service/--no-military-service", help="Filter to documents citing military service as argument (or exclude them)"),
 ):
     """Search the indexed manuscript corpus."""
     from archival_htr.rag import search as rag_search
 
     n_results = n if n > 0 else 100  # -1 or 0 → cap at 100 for 'all in collection'
     console.print(f"\n[bold]Searching for:[/bold] {query}\n")
+    filters = []
     if source:
-        console.print(f"[dim]Filtering to source: {source}[/dim]\n")
-    results = rag_search(query, n_results=n_results, source=source)
+        filters.append(f"source={source}")
+    if job_application is not None:
+        filters.append("job-application" if job_application else "no-job-application")
+    if military_service is not None:
+        filters.append("military-service" if military_service else "no-military-service")
+    if filters:
+        console.print(f"[dim]Filters: {', '.join(filters)}[/dim]\n")
+    results = rag_search(query, n_results=n_results, source=source, job_application=job_application, military_service=military_service)
 
     if not results:
         console.print("[yellow]No results found.[/yellow]")
@@ -132,6 +141,90 @@ def search(
         table.add_row(str(i), r["source"], str(r["score"]), excerpt)
 
     console.print(table)
+
+
+@app.command()
+def reclassify(
+    output_dir: Path = typer.Option(None, "--output", "-o", help="Folder containing transcribed/ and metadata/"),
+    doc: list[str] = typer.Option([], "--doc", "-d", help="Process only these document names; omit for all"),
+    overwrite: bool = typer.Option(False, "--overwrite", help="Re-classify already-classified documents"),
+):
+    """Classify transcribed documents for job-application type and military-service argument.
+
+    Reads existing transcripts (no images needed), calls the LLM, and writes
+    output/metadata/classification.csv. Then re-indexes each document so
+    ChromaDB chunk metadata includes the new flags (filterable with --job-application /
+    --military-service on the search command).
+    """
+    import csv as _csv
+    from archival_htr import config as cfg
+    from archival_htr.llm_client import classify_document
+    from archival_htr.rag import index_document
+
+    out = output_dir or Path(cfg.DATA_OUTPUT_DIR)
+    transcribed_dir = out / "transcribed"
+    metadata_dir = out / "metadata"
+    metadata_dir.mkdir(parents=True, exist_ok=True)
+    classification_csv = metadata_dir / "classification.csv"
+
+    # Load existing classifications to support --overwrite logic
+    existing: dict[str, dict] = {}
+    if classification_csv.exists():
+        with open(classification_csv, newline="", encoding="utf-8") as f:
+            for row in _csv.DictReader(f):
+                existing[row["source_doc"]] = row
+
+    txt_files = sorted(transcribed_dir.glob("*.txt"))
+    if doc:
+        txt_files = [f for f in txt_files if f.stem in doc]
+    if not txt_files:
+        console.print("[yellow]No transcripts found to classify.[/yellow]")
+        raise typer.Exit()
+
+    console.print(f"Classifying [bold]{len(txt_files)}[/bold] document(s)...\n")
+
+    updated = dict(existing)
+    for txt_path in txt_files:
+        doc_id = txt_path.stem
+        if doc_id in existing and not overwrite:
+            console.print(f"[dim]Already classified[/dim] {doc_id}, skipping.")
+            continue
+        transcript = txt_path.read_text(encoding="utf-8")
+        console.print(f"[cyan]Classifying[/cyan] {doc_id}...")
+        try:
+            result = classify_document(transcript)
+        except Exception as e:
+            console.print(f"[red]Error classifying {doc_id}:[/red] {e}")
+            continue
+        updated[doc_id] = {
+            "source_doc": doc_id,
+            "is_job_application": str(result["is_job_application"]).lower(),
+            "military_service_argument": str(result["military_service_argument"]).lower(),
+            "reasoning": result["reasoning"],
+        }
+        label = []
+        if result["is_job_application"]:
+            label.append("[green]job application[/green]")
+        if result["military_service_argument"]:
+            label.append("[yellow]military service[/yellow]")
+        tag = " + ".join(label) if label else "[dim]neither[/dim]"
+        console.print(f"  → {tag}: {result['reasoning']}")
+
+    # Write classification.csv
+    columns = ["source_doc", "is_job_application", "military_service_argument", "reasoning"]
+    with open(classification_csv, "w", newline="", encoding="utf-8") as f:
+        w = _csv.DictWriter(f, fieldnames=columns, extrasaction="ignore")
+        w.writeheader()
+        for row in sorted(updated.values(), key=lambda r: r["source_doc"]):
+            w.writerow(row)
+    console.print(f"\n[green]Written[/green] → {classification_csv} ({len(updated)} entries)\n")
+
+    # Re-index affected documents so ChromaDB flags are up to date
+    to_reindex = [f for f in txt_files if f.stem in updated]
+    if to_reindex:
+        console.print(f"Re-indexing [bold]{len(to_reindex)}[/bold] document(s) with updated flags...")
+        for txt_path in to_reindex:
+            index_document(txt_path, overwrite=True)
 
 
 @app.command()
