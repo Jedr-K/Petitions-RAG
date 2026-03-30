@@ -4,6 +4,8 @@ services:
       context: .
       args:
         EXTRAS: gemini
+    ports:
+      - "8080:8080"
     env_file: .env
     environment:
       DATA_INPUT_DIR: /data/input
