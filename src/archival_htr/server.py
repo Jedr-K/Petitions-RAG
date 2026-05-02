@@ -1,14 +1,30 @@
 """FastAPI web server for archival-htr query interface."""
+import csv
+import re
+import subprocess
+import threading
 from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, FileResponse, PlainTextResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from archival_htr import config
 
+_STATIC_DIR = Path(__file__).parent / "static"
+
 app = FastAPI(title="archival-htr", description="HTR corpus query interface")
+app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
+
+# ── Ingest background state ──────────────────────────────────────────────────
+
+_ingest_lock = threading.Lock()
+_ingest_running = False
+_ingest_log: list[str] = []
+_ingest_exit_code: Optional[int] = None
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*[mGKHF]|\r")
 
 
 # ── Pydantic models ──────────────────────────────────────────────────────────
@@ -61,7 +77,51 @@ class SourcesResponse(BaseModel):
     sources: list[str]
 
 
+class IngestRequest(BaseModel):
+    overwrite: bool = False
+    doc: list[str] = []
+
+
+class IngestStatusResponse(BaseModel):
+    running: bool
+    log: list[str]
+    exit_code: Optional[int] = None
+
+
+class FinalizedRequest(BaseModel):
+    text: str
+
+
+class PageMetadataResponse(BaseModel):
+    language: Optional[str] = None
+    category: Optional[str] = None
+    date_submission_writing: Optional[str] = None
+    single_page_or_part: Optional[str] = None
+    related_to_others: Optional[str] = None
+    is_job_application: Optional[bool] = None
+    military_service_argument: Optional[bool] = None
+
+
 # ── Helpers ──────────────────────────────────────────────────────────────────
+
+_SAFE_ID_RE = re.compile(r"^[\w\-\.]+$")
+_REVIEW_EXTENSIONS = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".webp", ".bmp"}
+
+
+def _safe_id(s: str) -> str:
+    if not _SAFE_ID_RE.match(s) or ".." in s:
+        raise HTTPException(status_code=400, detail=f"Invalid identifier: {s!r}")
+    return s
+
+
+def _find_image(source: str, page: str) -> Path | None:
+    folder = Path(config.DATA_INPUT_DIR) / source
+    for ext in _REVIEW_EXTENSIONS:
+        p = folder / f"{page}{ext}"
+        if p.exists():
+            return p
+    return None
+
 
 def _load_transcript(source: str) -> tuple[str, int]:
     """Return (text, char_count) for a source ID. Raises 404 if not found."""
@@ -159,362 +219,192 @@ def api_query(req: QueryRequest):
     return QueryResponse(answer=answer, source=req.source, context_chars=context_chars)
 
 
-# ── Web UI ───────────────────────────────────────────────────────────────────
+@app.post("/api/ingest", response_model=IngestStatusResponse)
+def api_ingest(req: IngestRequest):
+    global _ingest_running, _ingest_log, _ingest_exit_code
+    with _ingest_lock:
+        if _ingest_running:
+            raise HTTPException(status_code=409, detail="Ingest is already running.")
+        _ingest_running = True
+        _ingest_log = []
+        _ingest_exit_code = None
 
-_HTML = """<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>archival-htr</title>
-<style>
-  :root {
-    --bg: #1a1a2e;
-    --surface: #16213e;
-    --surface2: #0f3460;
-    --accent: #e94560;
-    --accent2: #533483;
-    --text: #eaeaea;
-    --text-dim: #8892a4;
-    --border: #2a3a5a;
-    --radius: 8px;
-    --success: #4caf50;
-    --warn: #ff9800;
-  }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
-  header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 1rem 2rem; display: flex; align-items: center; gap: 1rem; }
-  header h1 { font-size: 1.25rem; font-weight: 600; color: var(--accent); letter-spacing: 0.02em; }
-  header span { color: var(--text-dim); font-size: 0.85rem; }
-  .tabs { display: flex; gap: 0; background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 2rem; }
-  .tab-btn { background: none; border: none; color: var(--text-dim); padding: 0.75rem 1.25rem; cursor: pointer; font-size: 0.9rem; border-bottom: 2px solid transparent; transition: color 0.15s, border-color 0.15s; }
-  .tab-btn:hover { color: var(--text); }
-  .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
-  .tab-panel { display: none; }
-  .tab-panel.active { display: block; }
-  main { max-width: 900px; margin: 0 auto; padding: 2rem; }
-  .form-row { margin-bottom: 1rem; }
-  label { display: block; font-size: 0.8rem; color: var(--text-dim); margin-bottom: 0.35rem; text-transform: uppercase; letter-spacing: 0.05em; }
-  textarea, input[type=text], select {
-    width: 100%; background: var(--surface); border: 1px solid var(--border); color: var(--text);
-    padding: 0.6rem 0.8rem; border-radius: var(--radius); font-size: 0.95rem; font-family: inherit;
-    transition: border-color 0.15s;
-  }
-  textarea:focus, input[type=text]:focus, select:focus { outline: none; border-color: var(--accent2); }
-  textarea { resize: vertical; min-height: 80px; }
-  .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
-  .form-grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; }
-  .slider-row { display: flex; align-items: center; gap: 0.75rem; }
-  input[type=range] { flex: 1; accent-color: var(--accent); }
-  .slider-val { min-width: 2rem; text-align: right; font-weight: 600; color: var(--accent); }
-  button[type=submit] {
-    background: var(--accent); color: #fff; border: none; padding: 0.65rem 1.5rem;
-    border-radius: var(--radius); font-size: 0.95rem; cursor: pointer; font-weight: 600;
-    transition: opacity 0.15s;
-  }
-  button[type=submit]:hover { opacity: 0.85; }
-  button[type=submit]:disabled { opacity: 0.4; cursor: not-allowed; }
-  .results { margin-top: 1.5rem; }
-  .spinner { display: flex; justify-content: center; padding: 2rem; }
-  .spinner::after {
-    content: ''; width: 2rem; height: 2rem; border: 3px solid var(--border);
-    border-top-color: var(--accent); border-radius: 50%; animation: spin 0.7s linear infinite;
-  }
-  @keyframes spin { to { transform: rotate(360deg); } }
-  .error { background: #2d1010; border: 1px solid var(--accent); color: #ff8080; padding: 0.8rem 1rem; border-radius: var(--radius); font-size: 0.9rem; }
-  .empty { color: var(--text-dim); text-align: center; padding: 2rem; font-size: 0.9rem; }
-  .result-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 1rem; margin-bottom: 0.75rem; }
-  .result-card:hover { border-color: var(--accent2); }
-  .card-header { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.6rem; }
-  .badge { background: var(--accent2); color: #fff; font-size: 0.75rem; padding: 0.2rem 0.5rem; border-radius: 4px; font-weight: 600; }
-  .score-track { flex: 1; height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }
-  .score-bar { height: 100%; background: linear-gradient(90deg, var(--accent2), var(--accent)); border-radius: 3px; transition: width 0.3s; }
-  .score-label { font-size: 0.75rem; color: var(--text-dim); min-width: 3rem; text-align: right; }
-  .excerpt { font-size: 0.875rem; color: var(--text-dim); line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
-  .answer-box { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.25rem; }
-  .answer-meta { font-size: 0.8rem; color: var(--text-dim); margin-bottom: 0.75rem; display: flex; gap: 0.5rem; flex-wrap: wrap; }
-  .meta-tag { background: var(--surface2); padding: 0.2rem 0.5rem; border-radius: 4px; }
-  .answer-text { font-size: 0.925rem; line-height: 1.7; white-space: pre-wrap; word-break: break-word; }
-  select option[value=""] { color: var(--text-dim); }
-</style>
-</head>
-<body>
-<header>
-  <h1>archival-htr</h1>
-  <span>Historical manuscript corpus query interface</span>
-</header>
+    def _run():
+        global _ingest_running, _ingest_exit_code
+        try:
+            cmd = ["archival-htr", "ingest"]
+            if req.overwrite:
+                cmd.append("--overwrite")
+            for d in req.doc:
+                cmd += ["--doc", d]
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                env={**__import__("os").environ, "NO_COLOR": "1", "TERM": "dumb"},
+            )
+            for line in proc.stdout:
+                clean = _ANSI_RE.sub("", line).rstrip()
+                if clean:
+                    with _ingest_lock:
+                        _ingest_log.append(clean)
+            proc.wait()
+            _ingest_exit_code = proc.returncode
+        except Exception as exc:
+            with _ingest_lock:
+                _ingest_log.append(f"ERROR: {exc}")
+            _ingest_exit_code = 1
+        finally:
+            _ingest_running = False
 
-<div class="tabs">
-  <button class="tab-btn active" data-tab="search">Search</button>
-  <button class="tab-btn" data-tab="ask">Ask</button>
-  <button class="tab-btn" data-tab="query">Query</button>
-</div>
+    threading.Thread(target=_run, daemon=True).start()
+    return IngestStatusResponse(running=True, log=[], exit_code=None)
 
-<main>
 
-  <!-- SEARCH TAB -->
-  <div id="tab-search" class="tab-panel active">
-    <form id="search-form">
-      <div class="form-row">
-        <label for="s-query">Search query</label>
-        <textarea id="s-query" placeholder="e.g. petition requesting military pension after service in Flanders" required></textarea>
-      </div>
-      <div class="form-grid-3">
-        <div class="form-row">
-          <label>Results <span class="slider-val" id="s-n-val">5</span></label>
-          <div class="slider-row">
-            <input type="range" id="s-n" min="1" max="20" value="5">
-          </div>
-        </div>
-        <div class="form-row">
-          <label for="s-source">Source filter (optional)</label>
-          <input type="text" id="s-source" placeholder="e.g. 14">
-        </div>
-        <div class="form-row" style="grid-column: span 1"><!-- spacer --></div>
-      </div>
-      <div class="form-grid">
-        <div class="form-row">
-          <label for="s-job">Job application</label>
-          <select id="s-job">
-            <option value="">Any</option>
-            <option value="true">Yes</option>
-            <option value="false">No</option>
-          </select>
-        </div>
-        <div class="form-row">
-          <label for="s-mil">Military service</label>
-          <select id="s-mil">
-            <option value="">Any</option>
-            <option value="true">Yes</option>
-            <option value="false">No</option>
-          </select>
-        </div>
-      </div>
-      <button type="submit">Search</button>
-    </form>
-    <div id="search-results" class="results"></div>
-  </div>
+@app.get("/api/ingest/status", response_model=IngestStatusResponse)
+def api_ingest_status():
+    with _ingest_lock:
+        return IngestStatusResponse(
+            running=_ingest_running,
+            log=list(_ingest_log),
+            exit_code=_ingest_exit_code,
+        )
 
-  <!-- ASK TAB -->
-  <div id="tab-ask" class="tab-panel">
-    <form id="ask-form">
-      <div class="form-row">
-        <label for="a-question">Question</label>
-        <textarea id="a-question" placeholder="e.g. What arguments do petitioners use to justify their request for a pension?" required></textarea>
-      </div>
-      <div class="form-grid-3">
-        <div class="form-row">
-          <label>Context chunks <span class="slider-val" id="a-n-val">8</span></label>
-          <div class="slider-row">
-            <input type="range" id="a-n" min="1" max="20" value="8">
-          </div>
-        </div>
-        <div class="form-row">
-          <label for="a-source">Source filter (optional)</label>
-          <input type="text" id="a-source" placeholder="e.g. 14">
-        </div>
-        <div class="form-row"></div>
-      </div>
-      <div class="form-grid">
-        <div class="form-row">
-          <label for="a-job">Job application</label>
-          <select id="a-job">
-            <option value="">Any</option>
-            <option value="true">Yes</option>
-            <option value="false">No</option>
-          </select>
-        </div>
-        <div class="form-row">
-          <label for="a-mil">Military service</label>
-          <select id="a-mil">
-            <option value="">Any</option>
-            <option value="true">Yes</option>
-            <option value="false">No</option>
-          </select>
-        </div>
-      </div>
-      <button type="submit">Ask</button>
-    </form>
-    <div id="ask-results" class="results"></div>
-  </div>
 
-  <!-- QUERY TAB -->
-  <div id="tab-query" class="tab-panel">
-    <form id="query-form">
-      <div class="form-row">
-        <label for="q-source">Source document</label>
-        <select id="q-source" required>
-          <option value="">Loading sources…</option>
-        </select>
-      </div>
-      <div class="form-row">
-        <label for="q-question">Question</label>
-        <textarea id="q-question" placeholder="e.g. Who signed this petition and what was their rank?" required></textarea>
-      </div>
-      <button type="submit" id="q-submit" disabled>Query</button>
-    </form>
-    <div id="query-results" class="results"></div>
-  </div>
+# ── Review endpoints ──────────────────────────────────────────────────────────
 
-</main>
+@app.get("/api/review/{source}/pages")
+def review_pages(source: str):
+    """List pages for a source document with per-page availability flags."""
+    _safe_id(source)
+    input_folder = Path(config.DATA_INPUT_DIR) / source
+    if not input_folder.is_dir():
+        raise HTTPException(status_code=404, detail=f"Source '{source}' not found in input directory.")
+    out = Path(config.DATA_OUTPUT_DIR)
+    has_imported = (
+        (out / "imported" / f"{source}.txt").exists()
+        or (out / "imported" / f"{source}.xml").exists()
+    )
+    stems = sorted(
+        p.stem for p in input_folder.iterdir()
+        if p.suffix.lower() in _REVIEW_EXTENSIONS
+    )
+    return [
+        {
+            "stem": stem,
+            "has_imported": has_imported,
+            "has_transcribed": (out / "transcribed" / source / f"{stem}.txt").exists(),
+            "has_finalized": (out / "finalized" / source / f"{stem}.txt").exists(),
+        }
+        for stem in stems
+    ]
 
-<script>
-// ── Tab switching ────────────────────────────────────────────────────────────
-document.querySelectorAll('.tab-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-    btn.classList.add('active');
-    document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
-  });
-});
 
-// ── Slider labels ────────────────────────────────────────────────────────────
-document.getElementById('s-n').addEventListener('input', e => {
-  document.getElementById('s-n-val').textContent = e.target.value;
-});
-document.getElementById('a-n').addEventListener('input', e => {
-  document.getElementById('a-n-val').textContent = e.target.value;
-});
+@app.get("/api/review/{source}/{page}/image")
+def review_image(source: str, page: str):
+    """Serve the original scan image for a page."""
+    _safe_id(source)
+    _safe_id(page)
+    img = _find_image(source, page)
+    if img is None:
+        raise HTTPException(status_code=404, detail=f"Image not found for {source}/{page}")
+    return FileResponse(img)
 
-// ── Source list ──────────────────────────────────────────────────────────────
-async function loadSources() {
-  const sel = document.getElementById('q-source');
-  const btn = document.getElementById('q-submit');
-  try {
-    const resp = await fetch('/api/sources');
-    const data = await resp.json();
-    if (data.sources.length === 0) {
-      sel.innerHTML = '<option value="">— no sources indexed yet —</option>';
-      btn.disabled = true;
-    } else {
-      sel.innerHTML = '<option value="">Select a document…</option>' +
-        data.sources.map(s => '<option value="' + esc(s) + '">' + esc(s) + '</option>').join('');
-      sel.addEventListener('change', () => { btn.disabled = !sel.value; });
-      btn.disabled = true;
-    }
-  } catch {
-    sel.innerHTML = '<option value="">Failed to load sources</option>';
-  }
-}
-loadSources();
-document.getElementById('tab-query') && document.querySelector('[data-tab=query]').addEventListener('click', loadSources);
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
-function esc(s) {
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
-function threeState(val) {
-  if (val === 'true') return true;
-  if (val === 'false') return false;
-  return null;
-}
-function showSpinner(id) {
-  document.getElementById(id).innerHTML = '<div class="spinner"></div>';
-}
-function showError(id, msg) {
-  document.getElementById(id).innerHTML = '<div class="error">' + esc(msg) + '</div>';
-}
-async function apiFetch(url, body) {
-  const resp = await fetch(url, {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify(body),
-  });
-  const data = await resp.json();
-  if (!resp.ok) throw new Error(data.detail || resp.statusText);
-  return data;
-}
+@app.get("/api/review/{source}/{page}/imported", response_class=PlainTextResponse)
+def review_imported(source: str, page: str):
+    """Return the imported (pre-existing) transcript for this document."""
+    _safe_id(source)
+    _safe_id(page)
+    out = Path(config.DATA_OUTPUT_DIR) / "imported"
+    txt = out / f"{source}.txt"
+    if txt.exists():
+        return PlainTextResponse(txt.read_text(encoding="utf-8"))
+    xml = out / f"{source}.xml"
+    if xml.exists():
+        from archival_htr.ingest import extract_text_from_page_xml
+        return PlainTextResponse(extract_text_from_page_xml(xml))
+    raise HTTPException(status_code=404, detail=f"No imported transcript for '{source}'")
 
-// ── Search ───────────────────────────────────────────────────────────────────
-document.getElementById('search-form').addEventListener('submit', async e => {
-  e.preventDefault();
-  const resultsEl = document.getElementById('search-results');
-  showSpinner('search-results');
-  const body = {
-    query: document.getElementById('s-query').value.trim(),
-    n: parseInt(document.getElementById('s-n').value),
-    source: document.getElementById('s-source').value.trim() || null,
-    job_application: threeState(document.getElementById('s-job').value),
-    military_service: threeState(document.getElementById('s-mil').value),
-  };
-  try {
-    const data = await apiFetch('/api/search', body);
-    if (data.count === 0) {
-      resultsEl.innerHTML = '<div class="empty">No results found.</div>';
-      return;
-    }
-    resultsEl.innerHTML = data.results.map((r, i) => {
-      const pct = Math.round(r.score * 100);
-      const excerpt = esc(r.text.length > 400 ? r.text.slice(0, 400) + '…' : r.text);
-      return '<div class="result-card">' +
-        '<div class="card-header">' +
-          '<span class="badge">' + esc(r.source) + '</span>' +
-          '<div class="score-track"><div class="score-bar" style="width:' + pct + '%"></div></div>' +
-          '<span class="score-label">' + r.score.toFixed(3) + '</span>' +
-        '</div>' +
-        '<div class="excerpt">' + excerpt + '</div>' +
-        '</div>';
-    }).join('');
-  } catch(err) {
-    showError('search-results', err.message);
-  }
-});
 
-// ── Ask ──────────────────────────────────────────────────────────────────────
-document.getElementById('ask-form').addEventListener('submit', async e => {
-  e.preventDefault();
-  showSpinner('ask-results');
-  const body = {
-    question: document.getElementById('a-question').value.trim(),
-    n: parseInt(document.getElementById('a-n').value),
-    source: document.getElementById('a-source').value.trim() || null,
-    job_application: threeState(document.getElementById('a-job').value),
-    military_service: threeState(document.getElementById('a-mil').value),
-  };
-  try {
-    const data = await apiFetch('/api/ask', body);
-    const tags = data.sources.map(s => '<span class="meta-tag">' + esc(s) + '</span>').join('');
-    document.getElementById('ask-results').innerHTML =
-      '<div class="answer-box">' +
-        '<div class="answer-meta">' +
-          '<span>' + data.chunks_used + ' passage' + (data.chunks_used !== 1 ? 's' : '') + ' consulted</span>' +
-          tags +
-        '</div>' +
-        '<div class="answer-text">' + esc(data.answer) + '</div>' +
-      '</div>';
-  } catch(err) {
-    showError('ask-results', err.message);
-  }
-});
+@app.get("/api/review/{source}/{page}/transcribed", response_class=PlainTextResponse)
+def review_transcribed(source: str, page: str):
+    """Return the LLM-refined transcript for a specific page."""
+    _safe_id(source)
+    _safe_id(page)
+    p = Path(config.DATA_OUTPUT_DIR) / "transcribed" / source / f"{page}.txt"
+    if not p.exists():
+        raise HTTPException(status_code=404, detail=f"No LLM transcript for '{source}/{page}'")
+    return PlainTextResponse(p.read_text(encoding="utf-8"))
 
-// ── Query ─────────────────────────────────────────────────────────────────────
-document.getElementById('query-form').addEventListener('submit', async e => {
-  e.preventDefault();
-  showSpinner('query-results');
-  const body = {
-    question: document.getElementById('q-question').value.trim(),
-    source: document.getElementById('q-source').value,
-  };
-  try {
-    const data = await apiFetch('/api/query', body);
-    document.getElementById('query-results').innerHTML =
-      '<div class="answer-box">' +
-        '<div class="answer-meta">' +
-          '<span>Full transcript: <span class="meta-tag">' + esc(data.source) + '</span></span>' +
-          '<span>' + data.context_chars.toLocaleString() + ' chars in context</span>' +
-        '</div>' +
-        '<div class="answer-text">' + esc(data.answer) + '</div>' +
-      '</div>';
-  } catch(err) {
-    showError('query-results', err.message);
-  }
-});
-</script>
-</body>
-</html>"""
 
+@app.get("/api/review/{source}/{page}/finalized", response_class=PlainTextResponse)
+def review_get_finalized(source: str, page: str):
+    """Return the saved finalized transcript for a page."""
+    _safe_id(source)
+    _safe_id(page)
+    p = Path(config.DATA_OUTPUT_DIR) / "finalized" / source / f"{page}.txt"
+    if not p.exists():
+        raise HTTPException(status_code=404, detail=f"No finalized transcript for '{source}/{page}'")
+    return PlainTextResponse(p.read_text(encoding="utf-8"))
+
+
+@app.post("/api/review/{source}/{page}/finalized")
+def review_save_finalized(source: str, page: str, req: FinalizedRequest):
+    """Save the finalized transcript for a page."""
+    _safe_id(source)
+    _safe_id(page)
+    p = Path(config.DATA_OUTPUT_DIR) / "finalized" / source / f"{page}.txt"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(req.text, encoding="utf-8")
+    return {"saved": True}
+
+
+@app.get("/api/review/{source}/{page}/metadata", response_model=PageMetadataResponse)
+def review_metadata(source: str, page: str):
+    """Return taxonomy metadata for a specific page from its per-page CSV."""
+    _safe_id(source)
+    _safe_id(page)
+    csv_path = Path(config.DATA_OUTPUT_DIR) / "metadata" / f"{source}_{page}.csv"
+    if not csv_path.exists():
+        raise HTTPException(status_code=404, detail=f"No metadata for '{source}/{page}'")
+
+    with csv_path.open(encoding="utf-8", newline="") as fh:
+        rows = list(csv.DictReader(fh))
+    if not rows:
+        raise HTTPException(status_code=404, detail=f"Empty metadata for '{source}/{page}'")
+
+    row = rows[0]
+
+    def _clean(val: str | None) -> Optional[str]:
+        if not val or val.strip().lower() in ("unknown", "n/a", ""):
+            return None
+        return val.strip()
+
+    def _parse_bool(val: str | None) -> Optional[bool]:
+        if val is None:
+            return None
+        v = val.strip().lower()
+        if v == "true":
+            return True
+        if v == "false":
+            return False
+        return None
+
+    return PageMetadataResponse(
+        language=_clean(row.get("language")),
+        category=_clean(row.get("category")),
+        date_submission_writing=_clean(row.get("date_submission_writing")),
+        single_page_or_part=_clean(row.get("single_page_or_part")),
+        related_to_others=_clean(row.get("related_to_others")),
+        is_job_application=_parse_bool(row.get("is_job_application")),
+        military_service_argument=_parse_bool(row.get("military_service_argument")),
+    )
+
+
+# ── Web UI ────────────────────────────────────────────────────────────────────
 
 @app.get("/", response_class=HTMLResponse)
 def ui():
-    return HTMLResponse(content=_HTML)
+    return HTMLResponse(content=(_STATIC_DIR / "index.html").read_text(encoding="utf-8"))
