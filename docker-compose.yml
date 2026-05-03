@@ -11,6 +11,9 @@ services:
       DATA_INPUT_DIR: /data/input
       DATA_OUTPUT_DIR: /data/output
       CHROMA_DIR: /data/chroma
+      # Container-side override: reach the host's Ollama from inside Docker Desktop (Win/Mac).
+      # On Linux, replace with http://172.17.0.1:11434 or use network_mode: host.
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
     volumes:
       - ./data/input:/data/input
       - ./data/output:/data/output
