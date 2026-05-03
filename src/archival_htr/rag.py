@@ -39,79 +39,100 @@ def _chunk_text(text: str, chunk_size: int, overlap: int) -> list[str]:
     return chunks
 
 
-def _read_classification(output_dir: Path, doc_id: str) -> tuple[bool, bool]:
-    """Look up is_job_application and military_service_argument from classification.csv.
+def _read_classification(output_dir: Path, collection: str, document: str) -> tuple[bool, bool]:
+    """Look up is_job_application and military_service_argument for a document.
 
-    Returns (is_job_application, military_service_argument), defaulting to (False, False)
-    if the file doesn't exist or the document has no entry.
+    Checks metadata/{collection}/classification.csv first, then falls back to
+    metadata/{collection}/combined.csv. Returns (False, False) if not found.
     """
-    csv_path = output_dir / "metadata" / "classification.csv"
-    if not csv_path.exists():
-        return False, False
-    with open(csv_path, newline="", encoding="utf-8") as f:
-        for row in csv.DictReader(f):
-            if row.get("source_doc") == doc_id:
-                return (
-                    row.get("is_job_application", "false").lower() == "true",
-                    row.get("military_service_argument", "false").lower() == "true",
-                )
+    col_meta = output_dir / "metadata" / collection
+    for filename in ("classification.csv", "combined.csv"):
+        csv_path = col_meta / filename
+        if not csv_path.exists():
+            continue
+        with open(csv_path, newline="", encoding="utf-8") as f:
+            for row in csv.DictReader(f):
+                if row.get("source_doc") == document:
+                    return (
+                        row.get("is_job_application", "false").lower() == "true",
+                        row.get("military_service_argument", "false").lower() == "true",
+                    )
     return False, False
 
 
-def index_document(txt_path: Path, overwrite: bool = False):
-    """Chunk and embed a transcribed .txt file into ChromaDB."""
-    client = _get_client()
-    collection = _get_collection(client)
-    doc_id = txt_path.stem
+def _build_index_text(output_dir: Path, collection: str, document: str) -> str:
+    """Build indexable text for a document, preferring finalized pages over transcribed."""
+    from archival_htr.ingest import parse_transcribed_pages
+    from pathlib import Path as _Path
+    transcribed_combined = output_dir / "transcribed" / collection / f"{document}.txt"
+    if not transcribed_combined.exists():
+        return ""
+    pages = parse_transcribed_pages(transcribed_combined)
+    finalized_dir = output_dir / "finalized" / collection / document
+    parts = []
+    for page_name, transcribed_text in pages:
+        page_stem = _Path(page_name).stem
+        finalized_path = finalized_dir / f"{page_stem}.txt"
+        text = finalized_path.read_text(encoding="utf-8") if finalized_path.exists() else transcribed_text
+        parts.append(f"--- {page_name} ---\n{text}")
+    return "\n\n".join(parts)
 
-    # Check if already indexed
-    existing = collection.get(where={"source": doc_id}, limit=1)
+
+def index_document(collection: str, document: str, output_dir: Path, overwrite: bool = False):
+    """Chunk and embed a document into ChromaDB using finalized text where available."""
+    client = _get_client()
+    col = _get_collection(client)
+    source_id = f"{collection}/{document}"
+
+    existing = col.get(where={"source": source_id}, limit=1)
     if existing["ids"] and not overwrite:
-        console.print(f"[yellow]Already indexed[/yellow] {doc_id}, skipping.")
+        console.print(f"[yellow]Already indexed[/yellow] {source_id}, skipping.")
         return
 
-    # Delete old chunks if overwriting
     if overwrite:
-        collection.delete(where={"source": doc_id})
+        col.delete(where={"source": source_id})
 
-    text = txt_path.read_text(encoding="utf-8")
+    text = _build_index_text(output_dir, collection, document)
+    if not text:
+        console.print(f"[yellow]No text to index[/yellow] for {source_id}")
+        return
+
     chunks = _chunk_text(text, config.CHUNK_SIZE, config.CHUNK_OVERLAP)
+    is_job_app, military_svc = _read_classification(output_dir, collection, document)
 
-    # Read classification flags (written by `reclassify` or available from metadata CSVs)
-    output_dir = txt_path.parent.parent
-    is_job_app, military_svc = _read_classification(output_dir, doc_id)
-
-    console.print(f"[cyan]Indexing[/cyan] {doc_id} ({len(chunks)} chunks)...")
+    console.print(f"[cyan]Indexing[/cyan] {source_id} ({len(chunks)} chunks)...")
 
     for i, chunk in enumerate(chunks):
         embedding = embed_text(chunk)
-        collection.add(
-            ids=[f"{doc_id}::chunk_{i}"],
+        col.add(
+            ids=[f"{collection}::{document}::chunk_{i}"],
             embeddings=[embedding],
             documents=[chunk],
             metadatas=[{
-                "source": doc_id,
+                "collection": collection,
+                "document": document,
+                "source": source_id,
                 "chunk": i,
                 "is_job_application": is_job_app,
                 "military_service_argument": military_svc,
             }],
         )
 
-    console.print(f"[green]Indexed[/green] {doc_id}")
+    console.print(f"[green]Indexed[/green] {source_id}")
 
 
 def index_all(output_dir: Path = None, overwrite: bool = False):
     output_dir = output_dir or Path(config.DATA_OUTPUT_DIR)
-    gemini_dir = output_dir / "transcribed"
-    if gemini_dir.is_dir():
-        txt_files = sorted(gemini_dir.glob("*.txt"))
-        console.print(f"Searching in {gemini_dir} for .txt files...")
-    else:
-        txt_files = sorted(output_dir.glob("*.txt"))
-        console.print(f"Searching in {output_dir} for .txt files...")
-    console.print(f"Found [bold]{len(txt_files)}[/bold] transcription(s) to index\n")
-    for f in txt_files:
-        index_document(f, overwrite=overwrite)
+    transcribed_dir = output_dir / "transcribed"
+    pairs: list[tuple[str, str]] = []
+    if transcribed_dir.is_dir():
+        for col_dir in sorted(transcribed_dir.iterdir()):
+            if col_dir.is_dir():
+                for txt in sorted(col_dir.glob("*.txt")):
+                    pairs.append((col_dir.name, txt.stem))
+    console.print(f"Found [bold]{len(pairs)}[/bold] transcription(s) to index\n")
+    for col, doc in pairs:
+        index_document(col, doc, output_dir, overwrite=overwrite)
 
 
 def search(

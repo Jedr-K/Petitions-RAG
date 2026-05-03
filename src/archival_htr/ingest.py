@@ -70,13 +70,16 @@ def extract_text_from_page_xml(xml_path: Path) -> str:
 
 def get_document_folders(input_dir: Path) -> list[Path]:
     """
-    Each subfolder in input_dir is treated as one multi-page document.
-    Falls back to treating root-level images as a single document named '_root'.
+    Returns document leaf folders from input_dir/{collection}/{document}/.
+    Each returned path is the leaf document directory; caller derives collection
+    via folder.parent.name and document via folder.name.
     """
-    folders = sorted([f for f in input_dir.iterdir() if f.is_dir()])
-    if not folders:
-        # flat layout — treat whole input dir as one document
-        folders = [input_dir]
+    folders = []
+    for col_dir in sorted(input_dir.iterdir()):
+        if col_dir.is_dir():
+            for doc_dir in sorted(col_dir.iterdir()):
+                if doc_dir.is_dir():
+                    folders.append(doc_dir)
     return folders
 
 
@@ -128,18 +131,43 @@ def transcribe_document(
     output_dir: Path,
     overwrite: bool = False,
     page_stems: set[str] | None = None,
+    skip_transcription: bool = False,
 ) -> Path:
     """
-    Copy imported .txt/.xml to output_dir/imported/; transcribe with Gemini (using existing
-    material as context) and save to output_dir/transcribed/{doc_name}.txt. Returns path to that .txt.
-    If page_stems is set, only those pages (by image stem) are transcribed and merged into the existing file.
+    Copy imported .txt/.xml to output_dir/imported/{collection}/; optionally transcribe with
+    Gemini and save to output_dir/transcribed/{collection}/{doc_name}.txt.
+    If skip_transcription=True, copies imported transcripts as-is without LLM refinement.
+    Returns path to the .txt file. If page_stems is set, only those pages are processed.
     """
+    collection = doc_folder.parent.name
     doc_name = doc_folder.name
-    imported_dir = output_dir / IMPORTED_SUBDIR
-    gemini_dir = output_dir / TRANSCRIBED_SUBDIR
+    imported_dir = output_dir / IMPORTED_SUBDIR / collection
+    gemini_dir = output_dir / TRANSCRIBED_SUBDIR / collection
     gemini_txt_path = gemini_dir / f"{doc_name}.txt"
 
     _copy_imported_to(doc_folder, doc_name, imported_dir)
+
+    # If skip_transcription is True, copy imported transcripts to transcribed output and return
+    if skip_transcription:
+        existing_context = _build_existing_context(doc_folder)
+        if existing_context:
+            all_pages = get_pages(doc_folder)
+            page_to_text = dict(parse_transcribed_pages(imported_dir / f"{doc_name}.txt")) if (imported_dir / f"{doc_name}.txt").exists() else {}
+            if not page_to_text:
+                # Try XML
+                xml_path = get_xml_path(doc_folder)
+                if xml_path:
+                    xml_text = extract_text_from_page_xml(xml_path)
+                    for page in all_pages:
+                        page_to_text[page.name] = xml_text
+            gemini_dir.mkdir(parents=True, exist_ok=True)
+            full_text_parts = [f"--- {p.name} ---\n{page_to_text.get(p.name, '')}" for p in all_pages]
+            gemini_txt_path.write_text("\n\n".join(full_text_parts), encoding="utf-8")
+            console.print(f"[green]Copied imported transcripts[/green] → {gemini_txt_path}")
+            return gemini_txt_path
+        else:
+            console.print(f"[yellow]No imported transcripts found[/yellow] for {doc_name}, skipping.")
+            return gemini_txt_path
 
     all_pages = get_pages(doc_folder)
     if not all_pages:
@@ -153,9 +181,19 @@ def transcribe_document(
             return gemini_txt_path
     else:
         pages = all_pages
+        # Check if all current pages are already transcribed before skipping
         if gemini_txt_path.exists() and not overwrite:
-            console.print(f"[yellow]Skipping[/yellow] {doc_name} (already transcribed, use --overwrite to redo)")
-            return gemini_txt_path
+            existing_pages = set(name.split(" ---")[0].strip() for name, _ in parse_transcribed_pages(gemini_txt_path))
+            current_pages = set(p.name for p in all_pages)
+            if existing_pages == current_pages:
+                console.print(f"[yellow]Skipping[/yellow] {doc_name} (all pages already transcribed, use --overwrite to redo)")
+                return gemini_txt_path
+            # If there are new pages, keep only those for processing
+            pages = [p for p in all_pages if p.name not in existing_pages]
+            if pages:
+                console.print(f"[cyan]Found[/cyan] {len(pages)} new page(s) in {doc_name}")
+            else:
+                return gemini_txt_path
 
     existing_context = _build_existing_context(doc_folder)
     if existing_context:
@@ -248,16 +286,17 @@ def annotate_and_write_metadata(
     image_path: Path,
     transcript: str,
     output_dir: Path,
+    collection: str,
     doc_name: str,
     page_id: str,
     overwrite: bool = False,
 ) -> Path:
     """
     Run LLM metadata annotation for one (image, transcript) pair and write
-    a single-line CSV under output_dir/metadata/{doc_name}_{page_id}.csv.
-    Returns path to the written CSV. Use page_id = image_path.stem for one image.
+    a single-line CSV under output_dir/metadata/{collection}/{doc_name}_{page_id}.csv.
+    Returns path to the written CSV.
     """
-    metadata_dir = output_dir / METADATA_SUBDIR
+    metadata_dir = output_dir / METADATA_SUBDIR / collection
     safe_page_id = re.sub(r"[^\w\-.]", "_", page_id)
     csv_path = metadata_dir / f"{doc_name}_{safe_page_id}.csv"
     if csv_path.exists() and not overwrite:
@@ -276,12 +315,13 @@ def run_metadata_for_document(
     page_stems: set[str] | None = None,
 ) -> list[Path]:
     """
-    For each page in the document: load transcript from output_dir/transcribed/{doc_name}.txt,
-    run annotate_metadata(image, transcript), write one CSV to output_dir/metadata/.
+    For each page in the document: load transcript from output_dir/transcribed/{collection}/{doc_name}.txt,
+    run annotate_metadata(image, transcript), write one CSV to output_dir/metadata/{collection}/.
     If page_stems is set, only those pages are annotated. Returns list of written CSV paths.
     """
+    collection = doc_folder.parent.name
     doc_name = doc_folder.name
-    transcribed_path = output_dir / TRANSCRIBED_SUBDIR / f"{doc_name}.txt"
+    transcribed_path = output_dir / TRANSCRIBED_SUBDIR / collection / f"{doc_name}.txt"
     if not transcribed_path.exists():
         console.print(f"[yellow]No transcript[/yellow] for {doc_name}, skip metadata.")
         return []
@@ -302,7 +342,7 @@ def run_metadata_for_document(
             continue
         try:
             path = annotate_and_write_metadata(
-                page_path, transcript, output_dir, doc_name, page_path.stem, overwrite=overwrite
+                page_path, transcript, output_dir, collection, doc_name, page_path.stem, overwrite=overwrite
             )
             written.append(path)
         except Exception as e:
@@ -310,42 +350,44 @@ def run_metadata_for_document(
     return written
 
 
-def combine_metadata_csvs(output_dir: Path) -> Path:
+def combine_metadata_csvs(output_dir: Path) -> list[Path]:
     """
-    Merge all single-line CSVs in output_dir/metadata/ (excluding combined.csv)
-    into metadata/combined.csv. Each source CSV must have the same header.
-    Returns path to combined CSV.
+    For each collection dir in output_dir/metadata/, merge all single-line CSVs
+    (excluding combined.csv) into that collection's combined.csv.
+    Returns list of written combined paths.
     """
     metadata_dir = output_dir / METADATA_SUBDIR
-    combined_path = metadata_dir / METADATA_COMBINED_FILENAME
-    metadata_dir.mkdir(parents=True, exist_ok=True)
-    csv_files = sorted(
-        f for f in metadata_dir.glob("*.csv")
-        if f.name != METADATA_COMBINED_FILENAME
-    )
-    if not csv_files:
+    combined_paths = []
+    if not metadata_dir.is_dir():
+        console.print("[yellow]No metadata directory found.[/yellow]")
+        return combined_paths
+    col_dirs = sorted(p for p in metadata_dir.iterdir() if p.is_dir())
+    if not col_dirs:
         console.print("[yellow]No metadata CSVs to combine.[/yellow]")
+        return combined_paths
+    for col_dir in col_dirs:
+        combined_path = col_dir / METADATA_COMBINED_FILENAME
+        csv_files = sorted(f for f in col_dir.glob("*.csv") if f.name != METADATA_COMBINED_FILENAME)
+        if not csv_files:
+            continue
+        rows = []
+        header = None
+        for f in csv_files:
+            with open(f, newline="", encoding="utf-8") as fp:
+                r = csv.reader(fp)
+                row_header = next(r, None)
+                if row_header and header is None:
+                    header = row_header
+                for row in r:
+                    if row and len(row) == len(METADATA_CSV_COLUMNS):
+                        rows.append(row)
         with open(combined_path, "w", newline="", encoding="utf-8") as f:
             w = csv.writer(f)
-            w.writerow(METADATA_CSV_COLUMNS)
-        return combined_path
-    rows = []
-    header = None
-    for f in csv_files:
-        with open(f, newline="", encoding="utf-8") as fp:
-            r = csv.reader(fp)
-            row_header = next(r, None)
-            if row_header and header is None:
-                header = row_header
-            for row in r:
-                if row and len(row) == len(METADATA_CSV_COLUMNS):
-                    rows.append(row)
-    with open(combined_path, "w", newline="", encoding="utf-8") as f:
-        w = csv.writer(f)
-        w.writerow(header or METADATA_CSV_COLUMNS)
-        w.writerows(rows)
-    console.print(f"[green]Combined[/green] → {combined_path} ({len(rows)} rows)")
-    return combined_path
+            w.writerow(header or METADATA_CSV_COLUMNS)
+            w.writerows(rows)
+        console.print(f"[green]Combined[/green] → {combined_path} ({len(rows)} rows)")
+        combined_paths.append(combined_path)
+    return combined_paths
 
 
 def ingest_all(
@@ -355,17 +397,24 @@ def ingest_all(
     doc_names: list[str] | None = None,
     page_stems: list[str] | None = None,
     run_metadata: bool = True,
+    skip_transcription: bool = False,
 ) -> list[Path]:
     input_dir = input_dir or Path(config.DATA_INPUT_DIR)
     output_dir = output_dir or Path(config.DATA_OUTPUT_DIR)
 
     doc_folders = get_document_folders(input_dir)
     if doc_names:
-        doc_folders = [f for f in doc_folders if f.name in doc_names]
+        doc_names_set = set(doc_names)
+        doc_folders = [
+            f for f in doc_folders
+            if f.name in doc_names_set                              # by document name alone
+            or f"{f.parent.name}/{f.name}" in doc_names_set        # by collection/document
+            or f.parent.name in doc_names_set                      # by collection (all docs)
+        ]
         if not doc_folders:
             console.print(f"[red]No matching document(s) for --doc {doc_names}[/red]")
             return []
-        console.print(f"Targeting [bold]{len(doc_folders)}[/bold] document(s): {[f.name for f in doc_folders]}\n")
+        console.print(f"Targeting [bold]{len(doc_folders)}[/bold] document(s): {[f'{f.parent.name}/{f.name}' for f in doc_folders]}\n")
     else:
         console.print(f"Found [bold]{len(doc_folders)}[/bold] document(s) in {input_dir}\n")
 
@@ -375,7 +424,7 @@ def ingest_all(
 
     results = []
     for folder in doc_folders:
-        path = transcribe_document(folder, output_dir, overwrite=overwrite, page_stems=page_set)
+        path = transcribe_document(folder, output_dir, overwrite=overwrite, page_stems=page_set, skip_transcription=skip_transcription)
         results.append(path)
 
     if run_metadata:

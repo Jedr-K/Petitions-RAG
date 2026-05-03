@@ -20,9 +20,14 @@ def transcribe(
     doc: list[str] = typer.Option([], "--doc", "-d", help="Process only these subfolder names; omit for all"),
     page: list[str] = typer.Option([], "--page", "-p", help="Process only these page stems (e.g. 14245707_0051_113628229); omit for all"),
     no_metadata: bool = typer.Option(False, "--no-metadata", help="Skip metadata annotation and combine step"),
+    imported_only: bool = typer.Option(False, "--imported-only", help="Skip LLM transcription; use existing imported transcripts only"),
+    backend: str = typer.Option(None, "--backend", help="Override backend: 'ollama' or 'gemini' (default: from env BACKEND)"),
 ):
     """Transcribe manuscript images to .txt. Use --doc to limit to specific documents, --page for specific pages."""
+    import os
     from archival_htr.ingest import ingest_all
+    if backend:
+        os.environ["BACKEND"] = backend
     ingest_all(
         input_dir=input_dir,
         output_dir=output_dir,
@@ -30,6 +35,7 @@ def transcribe(
         doc_names=doc or None,
         page_stems=page or None,
         run_metadata=not no_metadata,
+        skip_transcription=imported_only,
     )
 
 
@@ -51,10 +57,15 @@ def ingest(
     doc: list[str] = typer.Option([], "--doc", "-d", help="Process only these subfolder names; omit for all"),
     page: list[str] = typer.Option([], "--page", "-p", help="Process only these page stems; omit for all"),
     no_metadata: bool = typer.Option(False, "--no-metadata", help="Skip metadata annotation and combine step"),
+    imported_only: bool = typer.Option(False, "--imported-only", help="Skip LLM transcription; use existing imported transcripts only"),
+    backend: str = typer.Option(None, "--backend", help="Override backend: 'ollama' or 'gemini' (default: from env BACKEND)"),
 ):
     """Run transcribe + metadata + index in one step. Use --doc/--page to limit scope."""
+    import os
     from archival_htr.ingest import ingest_all
     from archival_htr.rag import index_all
+    if backend:
+        os.environ["BACKEND"] = backend
     paths = ingest_all(
         input_dir=input_dir,
         output_dir=output_dir,
@@ -62,9 +73,11 @@ def ingest(
         doc_names=doc or None,
         page_stems=page or None,
         run_metadata=not no_metadata,
+        skip_transcription=imported_only,
     )
     if paths:
-        index_all(output_dir=output_dir or paths[0].parent.parent, overwrite=overwrite)
+        # paths[0] = output/transcribed/{collection}/{document}.txt → .parent×3 = output/
+        index_all(output_dir=output_dir or paths[0].parent.parent.parent, overwrite=overwrite)
 
 
 @app.command()
@@ -83,7 +96,13 @@ def metadata(
     output_dir = output_dir or Path(config.DATA_OUTPUT_DIR)
     doc_folders = get_document_folders(input_dir)
     if doc:
-        doc_folders = [f for f in doc_folders if f.name in doc]
+        doc_set = set(doc)
+        doc_folders = [
+            f for f in doc_folders
+            if f.name in doc_set
+            or f"{f.parent.name}/{f.name}" in doc_set
+            or f.parent.name in doc_set
+        ]
     page_set = set(page) if page else None
     for folder in doc_folders:
         run_metadata_for_document(folder, output_dir, overwrite=overwrite, page_stems=page_set)
@@ -208,40 +227,56 @@ def reclassify(
     out = output_dir or Path(cfg.DATA_OUTPUT_DIR)
     transcribed_dir = out / "transcribed"
     metadata_dir = out / "metadata"
-    metadata_dir.mkdir(parents=True, exist_ok=True)
-    classification_csv = metadata_dir / "classification.csv"
 
-    # Load existing classifications to support --overwrite logic
-    existing: dict[str, dict] = {}
-    if classification_csv.exists():
-        with open(classification_csv, newline="", encoding="utf-8") as f:
-            for row in _csv.DictReader(f):
-                existing[row["source_doc"]] = row
+    # Discover all (collection, document) pairs from transcribed/{collection}/{document}.txt
+    doc_set = set(doc) if doc else None
+    pairs: list[tuple[str, str, Path]] = []  # (collection, document, txt_path)
+    if transcribed_dir.is_dir():
+        for col_dir in sorted(transcribed_dir.iterdir()):
+            if not col_dir.is_dir():
+                continue
+            for txt_path in sorted(col_dir.glob("*.txt")):
+                col_name, doc_name = col_dir.name, txt_path.stem
+                if doc_set and not (
+                    doc_name in doc_set
+                    or f"{col_name}/{doc_name}" in doc_set
+                    or col_name in doc_set
+                ):
+                    continue
+                pairs.append((col_name, doc_name, txt_path))
 
-    txt_files = sorted(transcribed_dir.glob("*.txt"))
-    if doc:
-        txt_files = [f for f in txt_files if f.stem in doc]
-    if not txt_files:
+    if not pairs:
         console.print("[yellow]No transcripts found to classify.[/yellow]")
         raise typer.Exit()
 
-    console.print(f"Classifying [bold]{len(txt_files)}[/bold] document(s)...\n")
+    console.print(f"Classifying [bold]{len(pairs)}[/bold] document(s)...\n")
 
-    updated = dict(existing)
-    for txt_path in txt_files:
-        doc_id = txt_path.stem
-        if doc_id in existing and not overwrite:
-            console.print(f"[dim]Already classified[/dim] {doc_id}, skipping.")
+    # Load existing per-collection classification CSVs
+    existing: dict[str, dict[str, dict]] = {}  # col -> {doc -> row}
+    for col_name, doc_name, _ in pairs:
+        if col_name not in existing:
+            csv_path = metadata_dir / col_name / "classification.csv"
+            existing[col_name] = {}
+            if csv_path.exists():
+                with open(csv_path, newline="", encoding="utf-8") as f:
+                    for row in _csv.DictReader(f):
+                        existing[col_name][row["source_doc"]] = row
+
+    updated: dict[str, dict[str, dict]] = {k: dict(v) for k, v in existing.items()}
+    for col_name, doc_name, txt_path in pairs:
+        col_existing = existing.get(col_name, {})
+        if doc_name in col_existing and not overwrite:
+            console.print(f"[dim]Already classified[/dim] {col_name}/{doc_name}, skipping.")
             continue
         transcript = txt_path.read_text(encoding="utf-8")
-        console.print(f"[cyan]Classifying[/cyan] {doc_id}...")
+        console.print(f"[cyan]Classifying[/cyan] {col_name}/{doc_name}...")
         try:
             result = classify_document(transcript)
         except Exception as e:
-            console.print(f"[red]Error classifying {doc_id}:[/red] {e}")
+            console.print(f"[red]Error classifying {col_name}/{doc_name}:[/red] {e}")
             continue
-        updated[doc_id] = {
-            "source_doc": doc_id,
+        updated.setdefault(col_name, {})[doc_name] = {
+            "source_doc": doc_name,
             "is_job_application": str(result["is_job_application"]).lower(),
             "military_service_argument": str(result["military_service_argument"]).lower(),
             "reasoning": result["reasoning"],
@@ -254,21 +289,27 @@ def reclassify(
         tag = " + ".join(label) if label else "[dim]neither[/dim]"
         console.print(f"  → {tag}: {result['reasoning']}")
 
-    # Write classification.csv
+    # Write per-collection classification.csv files
     columns = ["source_doc", "is_job_application", "military_service_argument", "reasoning"]
-    with open(classification_csv, "w", newline="", encoding="utf-8") as f:
-        w = _csv.DictWriter(f, fieldnames=columns, extrasaction="ignore")
-        w.writeheader()
-        for row in sorted(updated.values(), key=lambda r: r["source_doc"]):
-            w.writerow(row)
-    console.print(f"\n[green]Written[/green] → {classification_csv} ({len(updated)} entries)\n")
+    for col_name, col_rows in updated.items():
+        col_meta_dir = metadata_dir / col_name
+        col_meta_dir.mkdir(parents=True, exist_ok=True)
+        classification_csv = col_meta_dir / "classification.csv"
+        with open(classification_csv, "w", newline="", encoding="utf-8") as f:
+            w = _csv.DictWriter(f, fieldnames=columns, extrasaction="ignore")
+            w.writeheader()
+            for row in sorted(col_rows.values(), key=lambda r: r["source_doc"]):
+                w.writerow(row)
+        console.print(f"[green]Written[/green] → {classification_csv} ({len(col_rows)} entries)")
+
+    console.print()
 
     # Re-index affected documents so ChromaDB flags are up to date
-    to_reindex = [f for f in txt_files if f.stem in updated]
+    to_reindex = [(c, d) for c, d, _ in pairs if d in updated.get(c, {})]
     if to_reindex:
         console.print(f"Re-indexing [bold]{len(to_reindex)}[/bold] document(s) with updated flags...")
-        for txt_path in to_reindex:
-            index_document(txt_path, overwrite=True)
+        for col_name, doc_name in to_reindex:
+            index_document(col_name, doc_name, out, overwrite=True)
 
 
 @app.command()
@@ -283,21 +324,38 @@ def query(
 
     out = output_dir or Path(config.DATA_OUTPUT_DIR)
     transcribed_dir = out / "transcribed"
-    combined = transcribed_dir / f"{source}.txt"
-    if combined.exists():
+    # source is expected as "collection/document" (e.g. "14/1")
+    collection_part, _, document_part = source.partition("/")
+    if document_part:
+        combined = transcribed_dir / collection_part / f"{document_part}.txt"
+        subdir = transcribed_dir / collection_part / document_part
+    else:
+        # bare name: search across all collections
+        combined = None
+        subdir = None
+        for col_dir in sorted(transcribed_dir.iterdir()):
+            if col_dir.is_dir():
+                candidate = col_dir / f"{source}.txt"
+                if candidate.exists():
+                    combined = candidate
+                    break
+                candidate_dir = col_dir / source
+                if candidate_dir.is_dir():
+                    subdir = candidate_dir
+                    break
+    if combined and combined.exists():
         context = combined.read_text(encoding="utf-8")
         console.print(f"[dim]Loaded[/dim] {combined} ({len(context):,} chars)\n")
-    else:
-        subdir = transcribed_dir / source
-        if not subdir.is_dir():
-            console.print(f"[red]No transcript found for source '{source}'[/red] (looked for {combined} or {subdir}/)")
-            raise typer.Exit(1)
+    elif subdir and subdir.is_dir():
         parts = sorted(subdir.glob("*.txt"))
         if not parts:
             console.print(f"[red]No .txt files in[/red] {subdir}")
             raise typer.Exit(1)
         context = "\n\n".join(f.read_text(encoding="utf-8") for f in parts)
         console.print(f"[dim]Loaded[/dim] {len(parts)} files from {subdir} ({len(context):,} chars)\n")
+    else:
+        console.print(f"[red]No transcript found for source '{source}'[/red]")
+        raise typer.Exit(1)
 
     console.print("[bold]Question:[/bold]", question, "\n")
     answer = query_with_context(context, question)
