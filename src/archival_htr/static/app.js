@@ -31,9 +31,11 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
     btn.classList.add('active');
     document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
-    const isReview = btn.dataset.tab === 'review';
-    document.querySelector('main').classList.toggle('review-active', isReview);
-    if (isReview && !rvLoaded) { rvLoadSources(); rvLoaded = true; }
+    const isReview   = btn.dataset.tab === 'review';
+    const isOverview = btn.dataset.tab === 'overview';
+    document.querySelector('main').classList.toggle('review-active', isReview || isOverview);
+    if (isReview   && !rvLoaded) { rvLoadCollections(); rvLoaded = true; }
+    if (isOverview && !ovLoaded) { ovLoad(); ovLoaded = true; }
   });
 });
 
@@ -227,32 +229,91 @@ document.getElementById('query-form').addEventListener('submit', async e => {
 let rvLoaded = false;
 let rvPages = [];
 let rvPageIdx = 0;
-let rvCurrentSource = '';
+let rvCurrentCollection = '';
+let rvCurrentDocument = '';
+let rvZoom = 1.0;
+let rvZoomMin = 0.1;
+let rvImgNaturalW = 0;
+let rvImgNaturalH = 0;
+const RV_ZOOM_STEP = 0.25;
+const RV_ZOOM_MAX  = 4.0;
+function rvApplyZoom() {
+  const panel = document.getElementById('rv-image-panel');
+  const wrap  = panel && panel.querySelector('.rv-img-wrap');
+  const img   = wrap  && wrap.querySelector('img');
+  if (!img || !rvImgNaturalW) return;
+  const vw = rvImgNaturalW * rvZoom;
+  const vh = rvImgNaturalH * rvZoom;
+  wrap.style.width  = vw + 'px';
+  wrap.style.height = vh + 'px';
+  img.style.transform = 'scale(' + rvZoom + ')';
+}
+function rvComputeZoomMin() {
+  const panel = document.getElementById('rv-image-panel');
+  const img = panel.querySelector('img');
+  if (!img || !img.naturalWidth) return;
+  rvImgNaturalW = img.naturalWidth;
+  rvImgNaturalH = img.naturalHeight;
+  rvZoomMin = Math.min(panel.clientWidth / rvImgNaturalW, panel.clientHeight / rvImgNaturalH);
+  rvZoom = Math.max(rvZoomMin, (panel.clientHeight * 0.6) / rvImgNaturalH);
+  rvApplyZoom();
+  panel.scrollLeft = Math.max(0, (rvImgNaturalW * rvZoom - panel.clientWidth)  / 2);
+  panel.scrollTop  = Math.max(0, (rvImgNaturalH * rvZoom - panel.clientHeight) / 2);
+}
 
-async function rvLoadSources() {
-  const sel = document.getElementById('rv-source');
+async function rvLoadCollections() {
+  const sel = document.getElementById('rv-collection');
   try {
-    const resp = await fetch('/api/sources');
+    const resp = await fetch('/api/collections');
     const data = await resp.json();
-    if (data.sources.length === 0) {
-      sel.innerHTML = '<option value="">— no sources —</option>';
+    if (!data.collections || data.collections.length === 0) {
+      sel.innerHTML = '<option value="">— no collections —</option>';
     } else {
-      sel.innerHTML = '<option value="">Select document…</option>' +
-        data.sources.map(s => '<option value="' + esc(s) + '">' + esc(s) + '</option>').join('');
+      sel.innerHTML = '<option value="">Select collection…</option>' +
+        data.collections.map(c => '<option value="' + esc(c) + '">' + esc(c) + '</option>').join('');
     }
   } catch {
     sel.innerHTML = '<option value="">Failed to load</option>';
   }
 }
 
-async function rvSelectSource(source) {
-  rvCurrentSource = source;
+async function rvSelectCollection(col) {
+  rvCurrentCollection = col;
+  rvCurrentDocument = '';
   rvPages = [];
   rvPageIdx = 0;
   rvClearPanels();
-  if (!source) { rvUpdateNav(); return; }
+  rvUpdateNav();
+  const docSel = document.getElementById('rv-document');
+  docSel.innerHTML = '<option value="">—</option>';
+  docSel.disabled = true;
+  if (!col) return;
   try {
-    const resp = await fetch('/api/review/' + encodeURIComponent(source) + '/pages');
+    const resp = await fetch('/api/collections/' + encodeURIComponent(col) + '/documents');
+    const data = await resp.json();
+    if (data.documents && data.documents.length > 0) {
+      docSel.innerHTML = '<option value="">Select document…</option>' +
+        data.documents.map(d => '<option value="' + esc(d) + '">' + esc(d) + '</option>').join('');
+      docSel.disabled = false;
+    } else {
+      docSel.innerHTML = '<option value="">— no documents —</option>';
+    }
+  } catch {
+    docSel.innerHTML = '<option value="">Failed to load</option>';
+  }
+}
+
+async function rvSelectDocument(doc) {
+  rvCurrentDocument = doc;
+  rvPages = [];
+  rvPageIdx = 0;
+  rvClearPanels();
+  if (!doc || !rvCurrentCollection) { rvUpdateNav(); return; }
+  try {
+    const resp = await fetch(
+      '/api/review/' + encodeURIComponent(rvCurrentCollection) +
+      '/' + encodeURIComponent(doc) + '/pages'
+    );
     rvPages = await resp.json();
     rvPageIdx = 0;
     rvUpdateNav();
@@ -322,15 +383,22 @@ async function rvLoadPage(idx) {
   rvPageIdx = idx;
   rvUpdateNav();
   const stem = rvPages[idx].stem;
-  const base = '/api/review/' + encodeURIComponent(rvCurrentSource) + '/' + encodeURIComponent(stem);
+  const base = '/api/review/' + encodeURIComponent(rvCurrentCollection) +
+               '/' + encodeURIComponent(rvCurrentDocument) +
+               '/' + encodeURIComponent(stem);
 
   fetch(base + '/metadata')
     .then(r => r.ok ? r.json() : null)
     .then(meta => rvRenderMeta(meta))
     .catch(() => rvRenderMeta(null));
 
-  document.getElementById('rv-image-panel').innerHTML =
-    '<img src="' + base + '/image?t=' + Date.now() + '" alt="page image">';
+  rvZoom = 1.0;
+  rvZoomMin = 0.1;
+  rvImgNaturalW = 0;
+  rvImgNaturalH = 0;
+  const rvImgPanel = document.getElementById('rv-image-panel');
+  rvImgPanel.innerHTML = '<div class="rv-img-wrap"><img src="' + base + '/image?t=' + Date.now() + '" alt="page image"></div>';
+  rvImgPanel.querySelector('img').addEventListener('load', rvComputeZoomMin);
 
   const impEl = document.getElementById('rv-imported-panel');
   impEl.innerHTML = '<div class="empty">Loading…</div>';
@@ -368,7 +436,52 @@ async function rvLoadPage(idx) {
   document.getElementById('rv-save').disabled = false;
 }
 
-document.getElementById('rv-source').addEventListener('change', e => rvSelectSource(e.target.value));
+document.getElementById('rv-zoom-in').addEventListener('click', () => {
+  rvZoom = Math.min(RV_ZOOM_MAX, rvZoom + RV_ZOOM_STEP);
+  rvApplyZoom();
+});
+document.getElementById('rv-zoom-out').addEventListener('click', () => {
+  rvZoom = Math.max(rvZoomMin, rvZoom - RV_ZOOM_STEP);
+  rvApplyZoom();
+});
+document.getElementById('rv-zoom-reset').addEventListener('click', () => {
+  rvZoom = 1.0;
+  rvApplyZoom();
+});
+document.getElementById('rv-image-panel').addEventListener('wheel', e => {
+  if (!document.querySelector('#rv-image-panel img')) return;
+  e.preventDefault();
+  rvZoom = e.deltaY < 0
+    ? Math.min(RV_ZOOM_MAX, rvZoom + RV_ZOOM_STEP)
+    : Math.max(rvZoomMin, rvZoom - RV_ZOOM_STEP);
+  rvApplyZoom();
+}, { passive: false });
+
+(function () {
+  const panel = document.getElementById('rv-image-panel');
+  let dragging = false, startX = 0, startY = 0, scrollX = 0, scrollY = 0;
+  panel.addEventListener('mousedown', e => {
+    if (e.button !== 0 || !document.querySelector('#rv-image-panel img')) return;
+    dragging = true;
+    startX = e.clientX; startY = e.clientY;
+    scrollX = panel.scrollLeft; scrollY = panel.scrollTop;
+    panel.style.cursor = 'grabbing';
+    e.preventDefault();
+  });
+  window.addEventListener('mousemove', e => {
+    if (!dragging) return;
+    panel.scrollLeft = scrollX - (e.clientX - startX);
+    panel.scrollTop  = scrollY - (e.clientY - startY);
+  });
+  window.addEventListener('mouseup', () => {
+    if (!dragging) return;
+    dragging = false;
+    panel.style.cursor = '';
+  });
+})();
+
+document.getElementById('rv-collection').addEventListener('change', e => rvSelectCollection(e.target.value));
+document.getElementById('rv-document').addEventListener('change', e => rvSelectDocument(e.target.value));
 document.getElementById('rv-prev').addEventListener('click', () => {
   if (rvPageIdx > 0) rvLoadPage(rvPageIdx - 1);
 });
@@ -377,9 +490,11 @@ document.getElementById('rv-next').addEventListener('click', () => {
 });
 
 document.getElementById('rv-save').addEventListener('click', async () => {
-  if (!rvCurrentSource || rvPages.length === 0) return;
+  if (!rvCurrentCollection || !rvCurrentDocument || rvPages.length === 0) return;
   const stem = rvPages[rvPageIdx].stem;
-  const base = '/api/review/' + encodeURIComponent(rvCurrentSource) + '/' + encodeURIComponent(stem);
+  const base = '/api/review/' + encodeURIComponent(rvCurrentCollection) +
+               '/' + encodeURIComponent(rvCurrentDocument) +
+               '/' + encodeURIComponent(stem);
   const statusEl = document.getElementById('rv-save-status');
   statusEl.style.color = '';
   statusEl.textContent = '';
@@ -401,4 +516,302 @@ document.getElementById('rv-save').addEventListener('click', async () => {
     statusEl.style.color = 'var(--accent)';
     statusEl.textContent = 'Error saving';
   }
+});
+
+// ── Overview ──────────────────────────────────────────────────────────────────
+let ovLoaded = false;
+let ovPages  = [];
+
+const OV_LANG_CLASS = {
+  dutch:   'ov-lang-dutch',
+  french:  'ov-lang-french',
+  latin:   'ov-lang-latin',
+  unknown: 'ov-lang-unknown',
+};
+
+const OV_CAT_CLASS = {
+  'petitie':             'ov-cat-petitie',
+  'sollicitatie':        'ov-cat-sollicitatie',
+  'appostille/addendum': 'ov-cat-appostille',
+  'rapport':             'ov-cat-rapport',
+  'bijlage':             'ov-cat-bijlage',
+  'attest':              'ov-cat-attest',
+  'andere':              'ov-cat-andere',
+};
+
+function ovCellClass(page, colorBy) {
+  if (colorBy === 'language') {
+    const k = (page.language || 'unknown').toLowerCase();
+    return OV_LANG_CLASS[k] || 'ov-lang-other';
+  }
+  if (colorBy === 'category') {
+    const k = (page.category || 'unknown').toLowerCase();
+    return OV_CAT_CLASS[k] || 'ov-cat-unknown';
+  }
+  if (colorBy === 'is_job_application') {
+    if (page.is_job_application === true)  return 'ov-bool-true';
+    if (page.is_job_application === false) return 'ov-bool-false';
+    return 'ov-bool-unknown';
+  }
+  if (colorBy === 'military_service_argument') {
+    if (page.military_service_argument === true)  return 'ov-bool-true';
+    if (page.military_service_argument === false) return 'ov-bool-false';
+    return 'ov-bool-unknown';
+  }
+  return 'ov-lang-unknown';
+}
+
+function ovGetSwatchClass(colorBy, key) {
+  if (colorBy === 'language') return OV_LANG_CLASS[key.toLowerCase()] || 'ov-lang-other';
+  if (colorBy === 'category') return OV_CAT_CLASS[key.toLowerCase()]  || 'ov-cat-unknown';
+  if (key === 'true')  return 'ov-bool-true';
+  if (key === 'false') return 'ov-bool-false';
+  return 'ov-bool-unknown';
+}
+
+function ovMatchesFilter(page) {
+  const fl = document.getElementById('ov-filter-language').value;
+  const fc = document.getElementById('ov-filter-category').value;
+  const fj = document.getElementById('ov-filter-job').value;
+  const fm = document.getElementById('ov-filter-mil').value;
+  if (fl && (page.language || '').toLowerCase() !== fl.toLowerCase()) return false;
+  if (fc && (page.category || '').toLowerCase() !== fc.toLowerCase()) return false;
+  if (fj && page.is_job_application !== (fj === 'true')) return false;
+  if (fm && page.military_service_argument !== (fm === 'true')) return false;
+  return true;
+}
+
+async function ovLoad() {
+  const grid = document.getElementById('ov-grid');
+  grid.innerHTML = '<div class="spinner"></div>';
+  document.getElementById('ov-stats').innerHTML = '';
+  try {
+    const resp = await fetch('/api/overview');
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const data = await resp.json();
+    ovPages = data.pages;
+    ovPopulateCollections();
+    ovRender();
+  } catch (err) {
+    grid.innerHTML = '<div class="error">' + esc(err.message) + '</div>';
+  }
+}
+
+function ovPopulateCollections() {
+  const sel = document.getElementById('ov-collection');
+  const prev = sel.value;
+  const names = [...new Set(ovPages.map(p => p.collection))].sort();
+  if (names.length === 0) {
+    sel.innerHTML = '<option value="">— no collections —</option>';
+    return;
+  }
+  sel.innerHTML = names.map(n => '<option value="' + esc(n) + '">' + esc(n) + '</option>').join('');
+  sel.value = names.includes(prev) ? prev : names[0];
+}
+
+function ovVisiblePages() {
+  const col = document.getElementById('ov-collection').value;
+  return col ? ovPages.filter(p => p.collection === col) : ovPages;
+}
+
+function ovRender() {
+  const colorBy = document.getElementById('ov-color-by').value;
+  const grid    = document.getElementById('ov-grid');
+
+  if (ovPages.length === 0) {
+    grid.innerHTML = '<div class="empty">No metadata available — run an ingest first, then click Refresh.</div>';
+    document.getElementById('ov-stats').innerHTML = '';
+    return;
+  }
+
+  const visible = ovVisiblePages();
+  if (visible.length === 0) {
+    grid.innerHTML = '<div class="empty">No pages in this collection.</div>';
+    document.getElementById('ov-stats').innerHTML = '';
+    return;
+  }
+
+  function sortKey(p) {
+    if (colorBy === 'language')                  return p.language || 'zzz';
+    if (colorBy === 'category')                  return p.category || 'zzz';
+    if (colorBy === 'is_job_application')        return String(p.is_job_application);
+    if (colorBy === 'military_service_argument') return String(p.military_service_argument);
+    return p.source_page;
+  }
+
+  // Sort: by doc, then by sortKey within doc → cells flow in continuous rows,
+  // with same-type pages clustering visually within each document.
+  const sorted = [...visible].sort((a, b) => {
+    if (a.source_doc !== b.source_doc) return a.source_doc.localeCompare(b.source_doc);
+    return sortKey(a).localeCompare(sortKey(b));
+  });
+
+  let html = '<div class="ov-cells">';
+  let prevDoc = null;
+  for (const p of sorted) {
+    if (prevDoc !== null && p.source_doc !== prevDoc) {
+      html += '<div class="ov-doc-sep" title="' + esc(p.source_doc) + '"></div>';
+    }
+    prevDoc = p.source_doc;
+    const cls = ovCellClass(p, colorBy);
+    html += '<div class="ov-cell ' + cls + '"' +
+            ' data-col="'  + esc(p.collection)  + '"' +
+            ' data-doc="'  + esc(p.source_doc)  + '"' +
+            ' data-page="' + esc(p.source_page) + '"' +
+            ' data-lang="' + esc(p.language  || '') + '"' +
+            ' data-cat="'  + esc(p.category  || '') + '"' +
+            ' data-date="' + esc(p.date_submission_writing || '') + '"' +
+            ' data-job="'  + (p.is_job_application      === null ? '' : String(p.is_job_application))      + '"' +
+            ' data-mil="'  + (p.military_service_argument === null ? '' : String(p.military_service_argument)) + '"' +
+            '></div>';
+  }
+  html += '</div>';
+  grid.innerHTML = html;
+
+  // Event delegation — re-attach each render
+  grid.addEventListener('mousemove',  ovHandleMouseMove);
+  grid.addEventListener('mouseleave', () => { document.getElementById('ov-tooltip').style.display = 'none'; });
+  grid.addEventListener('click',      ovHandleClick);
+
+  ovApplyFilter();
+}
+
+function ovApplyFilter() {
+  const anyFilter = (
+    document.getElementById('ov-filter-language').value ||
+    document.getElementById('ov-filter-category').value ||
+    document.getElementById('ov-filter-job').value ||
+    document.getElementById('ov-filter-mil').value
+  );
+
+  document.querySelectorAll('.ov-cell').forEach(cell => {
+    if (!anyFilter) {
+      cell.classList.remove('dimmed', 'highlighted');
+      return;
+    }
+    const pseudo = {
+      language:                  cell.dataset.lang || null,
+      category:                  cell.dataset.cat  || null,
+      is_job_application:        cell.dataset.job === 'true' ? true : cell.dataset.job === 'false' ? false : null,
+      military_service_argument: cell.dataset.mil === 'true' ? true : cell.dataset.mil === 'false' ? false : null,
+    };
+    if (ovMatchesFilter(pseudo)) {
+      cell.classList.add('highlighted');
+      cell.classList.remove('dimmed');
+    } else {
+      cell.classList.add('dimmed');
+      cell.classList.remove('highlighted');
+    }
+  });
+  ovUpdateStats();
+}
+
+function ovUpdateStats() {
+  const statsEl = document.getElementById('ov-stats');
+  const colorBy = document.getElementById('ov-color-by').value;
+  const active  = ovVisiblePages().filter(ovMatchesFilter);
+
+  if (active.length === 0) {
+    statsEl.innerHTML = '<span class="rv-meta-none">No pages match the current filter.</span>';
+    return;
+  }
+
+  const counts = {};
+  for (const p of active) {
+    let key;
+    if      (colorBy === 'language')                  key = p.language || 'unknown';
+    else if (colorBy === 'category')                  key = p.category || 'unknown';
+    else if (colorBy === 'is_job_application')        key = p.is_job_application === null ? 'unknown' : String(p.is_job_application);
+    else                                              key = p.military_service_argument === null ? 'unknown' : String(p.military_service_argument);
+    counts[key] = (counts[key] || 0) + 1;
+  }
+
+  const total  = active.length;
+  const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+
+  let barHtml = '<div class="ov-stat-bar">';
+  for (const [key, cnt] of sorted) {
+    const pct = cnt / total * 100;
+    const cls = ovGetSwatchClass(colorBy, key);
+    barHtml += '<div class="ov-stat-seg ' + cls + '" style="width:' + pct.toFixed(2) + '%">' +
+               (pct > 5 ? pct.toFixed(1) + '%' : '') + '</div>';
+  }
+  barHtml += '</div>';
+
+  let legendHtml = '<div class="ov-stat-legend">';
+  for (const [key, cnt] of sorted) {
+    const pct = (cnt / total * 100).toFixed(1);
+    const cls = ovGetSwatchClass(colorBy, key);
+    legendHtml += '<span class="ov-stat-legend-item">' +
+      '<span class="ov-stat-swatch ' + cls + '"></span>' +
+      '<span class="ov-stat-label">' + esc(key) + ' </span>' +
+      '<span class="ov-stat-pct">' + pct + '%</span>' +
+      '</span>';
+  }
+  legendHtml += '</div>';
+
+  statsEl.innerHTML = barHtml + legendHtml;
+}
+
+function ovHandleMouseMove(e) {
+  const cell = e.target.closest('.ov-cell');
+  const tip  = document.getElementById('ov-tooltip');
+  if (!cell) { tip.style.display = 'none'; return; }
+
+  const parts = [
+    cell.dataset.doc + ' / ' + cell.dataset.page,
+    cell.dataset.lang ? 'Language: '  + cell.dataset.lang : null,
+    cell.dataset.cat  ? 'Category: '  + cell.dataset.cat  : null,
+    cell.dataset.date ? 'Date: '      + cell.dataset.date : null,
+  ].filter(Boolean);
+
+  tip.textContent = parts.join('  |  ');
+  tip.style.display = 'block';
+  tip.style.left = (e.clientX + 14) + 'px';
+  tip.style.top  = (e.clientY - 10) + 'px';
+}
+
+function ovHandleClick(e) {
+  const cell = e.target.closest('.ov-cell');
+  if (!cell) return;
+  ovNavigateToReview(cell.dataset.col, cell.dataset.doc, cell.dataset.page);
+}
+
+async function ovNavigateToReview(collection, doc, page) {
+  // Switch tab
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  const reviewBtn = document.querySelector('[data-tab=review]');
+  reviewBtn.classList.add('active');
+  document.getElementById('tab-review').classList.add('active');
+  document.querySelector('main').classList.add('review-active');
+
+  if (!rvLoaded) { await rvLoadCollections(); rvLoaded = true; }
+
+  const colSel = document.getElementById('rv-collection');
+  colSel.value = collection;
+  await rvSelectCollection(collection);
+
+  const docSel = document.getElementById('rv-document');
+  docSel.value = doc;
+  await rvSelectDocument(doc);
+
+  const idx = rvPages.findIndex(p => p.stem === page);
+  if (idx >= 0) rvLoadPage(idx);
+}
+
+// Event wiring
+document.getElementById('ov-collection').addEventListener('change', () => {
+  if (ovPages.length) { ovRender(); }
+});
+document.getElementById('ov-color-by').addEventListener('change', () => {
+  if (ovPages.length) { ovRender(); }
+});
+['ov-filter-language', 'ov-filter-category', 'ov-filter-job', 'ov-filter-mil'].forEach(id => {
+  document.getElementById(id).addEventListener('change', () => { ovApplyFilter(); });
+});
+document.getElementById('ov-refresh').addEventListener('click', () => {
+  ovLoaded = false;
+  ovLoad();
+  ovLoaded = true;
 });

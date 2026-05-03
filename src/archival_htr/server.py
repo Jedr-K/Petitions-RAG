@@ -3,6 +3,7 @@ import csv
 import re
 import subprocess
 import threading
+from collections import Counter
 from pathlib import Path
 from typing import Optional
 
@@ -102,6 +103,32 @@ class PageMetadataResponse(BaseModel):
     military_service_argument: Optional[bool] = None
 
 
+class OverviewPage(BaseModel):
+    collection: str
+    source_doc: str
+    source_page: str
+    language: Optional[str] = None
+    single_page_or_part: Optional[str] = None
+    related_to_others: Optional[str] = None
+    date_submission_writing: Optional[str] = None
+    category: Optional[str] = None
+    is_job_application: Optional[bool] = None
+    military_service_argument: Optional[bool] = None
+
+
+class OverviewStats(BaseModel):
+    total: int
+    by_language: dict[str, int]
+    by_category: dict[str, int]
+    by_is_job_application: dict[str, int]
+    by_military_service: dict[str, int]
+
+
+class OverviewResponse(BaseModel):
+    pages: list[OverviewPage]
+    stats: OverviewStats
+
+
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 _SAFE_ID_RE = re.compile(r"^[\w\-\.]+$")
@@ -114,8 +141,8 @@ def _safe_id(s: str) -> str:
     return s
 
 
-def _find_image(source: str, page: str) -> Path | None:
-    folder = Path(config.DATA_INPUT_DIR) / source
+def _find_image(collection: str, document: str, page: str) -> Path | None:
+    folder = Path(config.DATA_INPUT_DIR) / collection / document
     for ext in _REVIEW_EXTENSIONS:
         p = folder / f"{page}{ext}"
         if p.exists():
@@ -123,15 +150,67 @@ def _find_image(source: str, page: str) -> Path | None:
     return None
 
 
+def _parse_overview_row(row: dict, collection: str) -> Optional[OverviewPage]:
+    source_doc  = row.get("source_doc",  "").strip()
+    source_page = row.get("source_page", "").strip()
+    if not source_doc or not source_page:
+        return None
+
+    def _clean(v: str | None) -> Optional[str]:
+        s = (v or "").strip()
+        return s if s and s.lower() not in ("unknown", "n/a", "") else None
+
+    def _parse_bool(v: str | None) -> Optional[bool]:
+        s = (v or "").strip().lower()
+        if s == "true":  return True
+        if s == "false": return False
+        return None
+
+    return OverviewPage(
+        collection=collection,
+        source_doc=source_doc,
+        source_page=source_page,
+        language=_clean(row.get("language")),
+        single_page_or_part=_clean(row.get("single_page_or_part")),
+        related_to_others=_clean(row.get("related_to_others")),
+        date_submission_writing=_clean(row.get("date_submission_writing")),
+        category=_clean(row.get("category")),
+        is_job_application=_parse_bool(row.get("is_job_application")),
+        military_service_argument=_parse_bool(row.get("military_service_argument")),
+    )
+
+
+def _compute_overview_stats(pages: list[OverviewPage]) -> OverviewStats:
+    lang_ctr = Counter()
+    cat_ctr  = Counter()
+    job_ctr  = Counter()
+    mil_ctr  = Counter()
+    for p in pages:
+        lang_ctr[p.language or "unknown"] += 1
+        cat_ctr[p.category or "unknown"] += 1
+        job_ctr["true" if p.is_job_application is True else
+                "false" if p.is_job_application is False else "unknown"] += 1
+        mil_ctr["true" if p.military_service_argument is True else
+                "false" if p.military_service_argument is False else "unknown"] += 1
+    return OverviewStats(
+        total=len(pages),
+        by_language=dict(lang_ctr),
+        by_category=dict(cat_ctr),
+        by_is_job_application=dict(job_ctr),
+        by_military_service=dict(mil_ctr),
+    )
+
+
 def _load_transcript(source: str) -> tuple[str, int]:
-    """Return (text, char_count) for a source ID. Raises 404 if not found."""
+    """Return (text, char_count) for a 'collection/document' source ID. Raises 404 if not found."""
+    collection, _, document = source.partition("/")
     out = Path(config.DATA_OUTPUT_DIR)
     transcribed_dir = out / "transcribed"
-    combined = transcribed_dir / f"{source}.txt"
+    combined = transcribed_dir / collection / f"{document}.txt"
     if combined.exists():
         text = combined.read_text(encoding="utf-8")
         return text, len(text)
-    subdir = transcribed_dir / source
+    subdir = transcribed_dir / collection / document
     if subdir.is_dir():
         parts = sorted(subdir.glob("*.txt"))
         if parts:
@@ -147,17 +226,41 @@ def health():
     return {"status": "ok"}
 
 
+@app.get("/api/collections")
+def list_collections():
+    """Return sorted list of collection names (top-level dirs in input)."""
+    input_dir = Path(config.DATA_INPUT_DIR)
+    if not input_dir.is_dir():
+        return {"collections": []}
+    return {"collections": sorted(p.name for p in input_dir.iterdir() if p.is_dir())}
+
+
+@app.get("/api/collections/{collection}/documents")
+def list_documents(collection: str):
+    """Return sorted list of document names within a collection."""
+    _safe_id(collection)
+    col_dir = Path(config.DATA_INPUT_DIR) / collection
+    if not col_dir.is_dir():
+        raise HTTPException(status_code=404, detail=f"Collection '{collection}' not found")
+    return {"documents": sorted(p.name for p in col_dir.iterdir() if p.is_dir())}
+
+
 @app.get("/api/sources", response_model=SourcesResponse)
 def list_sources():
-    """Return sorted list of available source document IDs."""
+    """Return sorted list of indexed source IDs as 'collection/document' composites."""
     transcribed_dir = Path(config.DATA_OUTPUT_DIR) / "transcribed"
     if not transcribed_dir.is_dir():
         return SourcesResponse(sources=[])
-    sources = sorted(
-        {p.stem for p in transcribed_dir.glob("*.txt")}
-        | {p.name for p in transcribed_dir.iterdir() if p.is_dir()}
-    )
-    return SourcesResponse(sources=sources)
+    sources: set[str] = set()
+    for col_dir in transcribed_dir.iterdir():
+        if not col_dir.is_dir():
+            continue
+        for txt in col_dir.glob("*.txt"):
+            sources.add(f"{col_dir.name}/{txt.stem}")
+        for sub in col_dir.iterdir():
+            if sub.is_dir():
+                sources.add(f"{col_dir.name}/{sub.name}")
+    return SourcesResponse(sources=sorted(sources))
 
 
 @app.post("/api/search", response_model=SearchResponse)
@@ -274,18 +377,15 @@ def api_ingest_status():
 
 # ── Review endpoints ──────────────────────────────────────────────────────────
 
-@app.get("/api/review/{source}/pages")
-def review_pages(source: str):
-    """List pages for a source document with per-page availability flags."""
-    _safe_id(source)
-    input_folder = Path(config.DATA_INPUT_DIR) / source
+@app.get("/api/review/{collection}/{document}/pages")
+def review_pages(collection: str, document: str):
+    """List pages for a document with per-page availability flags."""
+    _safe_id(collection)
+    _safe_id(document)
+    input_folder = Path(config.DATA_INPUT_DIR) / collection / document
     if not input_folder.is_dir():
-        raise HTTPException(status_code=404, detail=f"Source '{source}' not found in input directory.")
+        raise HTTPException(status_code=404, detail=f"Document '{collection}/{document}' not found in input.")
     out = Path(config.DATA_OUTPUT_DIR)
-    has_imported = (
-        (out / "imported" / f"{source}.txt").exists()
-        or (out / "imported" / f"{source}.xml").exists()
-    )
     stems = sorted(
         p.stem for p in input_folder.iterdir()
         if p.suffix.lower() in _REVIEW_EXTENSIONS
@@ -293,87 +393,102 @@ def review_pages(source: str):
     return [
         {
             "stem": stem,
-            "has_imported": has_imported,
-            "has_transcribed": (out / "transcribed" / source / f"{stem}.txt").exists(),
-            "has_finalized": (out / "finalized" / source / f"{stem}.txt").exists(),
+            "has_imported": (
+                (out / "imported" / collection / document / f"{stem}.txt").exists()
+                or (out / "imported" / collection / f"{document}.txt").exists()
+                or (out / "imported" / collection / f"{document}.xml").exists()
+            ),
+            "has_transcribed": (out / "transcribed" / collection / document / f"{stem}.txt").exists(),
+            "has_finalized": (out / "finalized" / collection / document / f"{stem}.txt").exists(),
         }
         for stem in stems
     ]
 
 
-@app.get("/api/review/{source}/{page}/image")
-def review_image(source: str, page: str):
+@app.get("/api/review/{collection}/{document}/{page}/image")
+def review_image(collection: str, document: str, page: str):
     """Serve the original scan image for a page."""
-    _safe_id(source)
+    _safe_id(collection)
+    _safe_id(document)
     _safe_id(page)
-    img = _find_image(source, page)
+    img = _find_image(collection, document, page)
     if img is None:
-        raise HTTPException(status_code=404, detail=f"Image not found for {source}/{page}")
+        raise HTTPException(status_code=404, detail=f"Image not found for {collection}/{document}/{page}")
     return FileResponse(img)
 
 
-@app.get("/api/review/{source}/{page}/imported", response_class=PlainTextResponse)
-def review_imported(source: str, page: str):
-    """Return the imported (pre-existing) transcript for this document."""
-    _safe_id(source)
+@app.get("/api/review/{collection}/{document}/{page}/imported", response_class=PlainTextResponse)
+def review_imported(collection: str, document: str, page: str):
+    """Return the imported (pre-existing) transcript for a page or its parent document."""
+    _safe_id(collection)
+    _safe_id(document)
     _safe_id(page)
     out = Path(config.DATA_OUTPUT_DIR) / "imported"
-    txt = out / f"{source}.txt"
+    # Per-page imported file takes priority
+    per_page = out / collection / document / f"{page}.txt"
+    if per_page.exists():
+        return PlainTextResponse(per_page.read_text(encoding="utf-8"))
+    # Fall back to combined document-level transcript
+    txt = out / collection / f"{document}.txt"
     if txt.exists():
         return PlainTextResponse(txt.read_text(encoding="utf-8"))
-    xml = out / f"{source}.xml"
+    xml = out / collection / f"{document}.xml"
     if xml.exists():
         from archival_htr.ingest import extract_text_from_page_xml
         return PlainTextResponse(extract_text_from_page_xml(xml))
-    raise HTTPException(status_code=404, detail=f"No imported transcript for '{source}'")
+    raise HTTPException(status_code=404, detail=f"No imported transcript for '{collection}/{document}'")
 
 
-@app.get("/api/review/{source}/{page}/transcribed", response_class=PlainTextResponse)
-def review_transcribed(source: str, page: str):
+@app.get("/api/review/{collection}/{document}/{page}/transcribed", response_class=PlainTextResponse)
+def review_transcribed(collection: str, document: str, page: str):
     """Return the LLM-refined transcript for a specific page."""
-    _safe_id(source)
+    _safe_id(collection)
+    _safe_id(document)
     _safe_id(page)
-    p = Path(config.DATA_OUTPUT_DIR) / "transcribed" / source / f"{page}.txt"
+    p = Path(config.DATA_OUTPUT_DIR) / "transcribed" / collection / document / f"{page}.txt"
     if not p.exists():
-        raise HTTPException(status_code=404, detail=f"No LLM transcript for '{source}/{page}'")
+        raise HTTPException(status_code=404, detail=f"No LLM transcript for '{collection}/{document}/{page}'")
     return PlainTextResponse(p.read_text(encoding="utf-8"))
 
 
-@app.get("/api/review/{source}/{page}/finalized", response_class=PlainTextResponse)
-def review_get_finalized(source: str, page: str):
+@app.get("/api/review/{collection}/{document}/{page}/finalized", response_class=PlainTextResponse)
+def review_get_finalized(collection: str, document: str, page: str):
     """Return the saved finalized transcript for a page."""
-    _safe_id(source)
+    _safe_id(collection)
+    _safe_id(document)
     _safe_id(page)
-    p = Path(config.DATA_OUTPUT_DIR) / "finalized" / source / f"{page}.txt"
+    p = Path(config.DATA_OUTPUT_DIR) / "finalized" / collection / document / f"{page}.txt"
     if not p.exists():
-        raise HTTPException(status_code=404, detail=f"No finalized transcript for '{source}/{page}'")
+        raise HTTPException(status_code=404, detail=f"No finalized transcript for '{collection}/{document}/{page}'")
     return PlainTextResponse(p.read_text(encoding="utf-8"))
 
 
-@app.post("/api/review/{source}/{page}/finalized")
-def review_save_finalized(source: str, page: str, req: FinalizedRequest):
+@app.post("/api/review/{collection}/{document}/{page}/finalized")
+def review_save_finalized(collection: str, document: str, page: str, req: FinalizedRequest):
     """Save the finalized transcript for a page."""
-    _safe_id(source)
+    _safe_id(collection)
+    _safe_id(document)
     _safe_id(page)
-    p = Path(config.DATA_OUTPUT_DIR) / "finalized" / source / f"{page}.txt"
+    p = Path(config.DATA_OUTPUT_DIR) / "finalized" / collection / document / f"{page}.txt"
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(req.text, encoding="utf-8")
     return {"saved": True}
 
 
-@app.get("/api/review/{source}/{page}/metadata", response_model=PageMetadataResponse)
-def review_metadata(source: str, page: str):
+@app.get("/api/review/{collection}/{document}/{page}/metadata", response_model=PageMetadataResponse)
+def review_metadata(collection: str, document: str, page: str):
     """Return taxonomy metadata for a specific page from its per-page CSV."""
-    _safe_id(source)
+    _safe_id(collection)
+    _safe_id(document)
     _safe_id(page)
-    csv_path = Path(config.DATA_OUTPUT_DIR) / "metadata" / f"{source}_{page}.csv"
+    csv_path = Path(config.DATA_OUTPUT_DIR) / "metadata" / collection / f"{document}_{page}.csv"
     if not csv_path.exists():
-        raise HTTPException(status_code=404, detail=f"No metadata for '{source}/{page}'")
+        raise HTTPException(status_code=404, detail=f"No metadata for '{collection}/{document}/{page}'")
 
     with csv_path.open(encoding="utf-8", newline="") as fh:
         rows = list(csv.DictReader(fh))
     if not rows:
-        raise HTTPException(status_code=404, detail=f"Empty metadata for '{source}/{page}'")
+        raise HTTPException(status_code=404, detail=f"Empty metadata for '{collection}/{document}/{page}'")
 
     row = rows[0]
 
@@ -401,6 +516,44 @@ def review_metadata(source: str, page: str):
         is_job_application=_parse_bool(row.get("is_job_application")),
         military_service_argument=_parse_bool(row.get("military_service_argument")),
     )
+
+
+@app.get("/api/overview", response_model=OverviewResponse)
+def api_overview(
+    language: Optional[str] = None,
+    category: Optional[str] = None,
+    is_job_application: Optional[bool] = None,
+    military_service_argument: Optional[bool] = None,
+):
+    """Return all page metadata for the overview heatmap, with optional filtering."""
+    metadata_root = Path(config.DATA_OUTPUT_DIR) / "metadata"
+    pages: list[OverviewPage] = []
+
+    if metadata_root.is_dir():
+        for col_dir in sorted(metadata_root.iterdir()):
+            if not col_dir.is_dir():
+                continue
+            collection_name = col_dir.name
+            combined_csv = col_dir / "combined.csv"
+            csv_files = [combined_csv] if combined_csv.exists() else sorted(col_dir.glob("*.csv"))
+
+            for csv_path in csv_files:
+                with csv_path.open(encoding="utf-8", newline="") as fh:
+                    for row in csv.DictReader(fh):
+                        page = _parse_overview_row(row, collection_name)
+                        if page is None:
+                            continue
+                        if language and (page.language or "").lower() != language.lower():
+                            continue
+                        if category and (page.category or "").lower() != category.lower():
+                            continue
+                        if is_job_application is not None and page.is_job_application != is_job_application:
+                            continue
+                        if military_service_argument is not None and page.military_service_argument != military_service_argument:
+                            continue
+                        pages.append(page)
+
+    return OverviewResponse(pages=pages, stats=_compute_overview_stats(pages))
 
 
 # ── Web UI ────────────────────────────────────────────────────────────────────

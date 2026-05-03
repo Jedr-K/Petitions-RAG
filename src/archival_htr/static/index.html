@@ -19,7 +19,7 @@
     --warn: #ff9800;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); height: 100vh; overflow: hidden; }
   header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 1rem 2rem; display: flex; align-items: center; gap: 1rem; }
   header h1 { font-size: 1.25rem; font-weight: 600; color: var(--text); letter-spacing: 0.02em; }
   header span { color: var(--text-dim); font-size: 0.85rem; }
@@ -74,9 +74,10 @@
   .meta-tag { background: var(--surface2); padding: 0.2rem 0.5rem; border-radius: 4px; }
   .answer-text { font-size: 0.925rem; line-height: 1.7; white-space: pre-wrap; word-break: break-word; }
   select option[value=""] { color: var(--text-dim); }
+  .rv-footer { background: var(--surface); border-top: 1px solid var(--border); height: 20px; flex-shrink: 0; }
 
   /* ── Review tab ── */
-  #tab-review.active { display: flex !important; flex-direction: column; height: calc(100vh - 90px); }
+  #tab-review.active { display: flex !important; flex-direction: column; height: calc(100vh - 100px); }
   .review-toolbar {
     display: flex; align-items: center; gap: 0.75rem;
     padding: 0.6rem 1rem; border-bottom: 1px solid var(--border);
@@ -87,7 +88,7 @@
   .review-toolbar button { background: var(--surface2); color: var(--text); border: 1px solid var(--border); padding: 0.3rem 0.65rem; border-radius: 4px; cursor: pointer; font-size: 0.9rem; }
   .review-toolbar button:disabled { opacity: 0.4; cursor: not-allowed; }
   #rv-page-label { font-size: 0.82rem; color: var(--text-dim); min-width: 140px; }
-  .review-grid { display: grid; grid-template-columns: repeat(4, 1fr); flex: 1; overflow: hidden; }
+  .review-grid { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; flex: 1; overflow: hidden; }
   .review-panel { display: flex; flex-direction: column; border-right: 1px solid var(--border); overflow: hidden; }
   .review-panel:last-child { border-right: none; }
   .review-panel-header {
@@ -101,6 +102,13 @@
   #rv-save-status { font-size: 0.75rem; }
   .review-panel-body { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 0.75rem; background: var(--surface); }
   .review-panel-body img { max-width: 100%; height: auto; display: block; }
+  .rv-zoom-controls { display: flex; align-items: center; margin-left: auto; }
+  .rv-zoom-controls button { background: var(--surface); border: 1px solid var(--border); border-radius: 3px; cursor: pointer; font-size: 0.9rem; line-height: 1; padding: 1px 7px; margin-left: 3px; color: var(--text); }
+  .rv-zoom-controls button:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
+  #rv-image-panel { overflow: auto; display: flex; align-items: center; justify-content: center; cursor: grab; scrollbar-width: none; -ms-overflow-style: none; }
+  #rv-image-panel::-webkit-scrollbar { display: none; }
+  .rv-img-wrap { display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  #rv-image-panel img { transform-origin: center; transition: transform 0.15s ease; max-width: none; display: block; }
   .review-panel-body pre { white-space: pre-wrap; word-break: break-word; font-size: 0.8rem; line-height: 1.6; color: var(--text-dim); margin: 0; font-family: inherit; }
   #rv-finalized-panel { padding: 0; display: flex; flex-direction: column; }
   #rv-editor { flex: 1; width: 100%; background: var(--surface); border: none; color: var(--text); font-size: 0.8rem; line-height: 1.6; resize: none; padding: 0.75rem; font-family: inherit; min-height: 0; }
@@ -126,6 +134,84 @@
   .rv-meta-bool.yes { background: #1a3a1a; color: #6fcf6f; border: 1px solid #2d5a2d; }
   .rv-meta-bool.no  { background: #2a2a2a; color: #888;    border: 1px solid #3a3a3a; }
   .rv-meta-none { color: var(--text-dim); font-style: italic; }
+
+  /* ── Overview tab ── */
+  #tab-overview.active { display: flex !important; flex-direction: column; }
+  .ov-toolbar {
+    display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;
+    padding: 0.55rem 1rem; border-bottom: 1px solid var(--border);
+    background: var(--surface); flex-shrink: 0;
+  }
+  .ov-toolbar label { display: inline; text-transform: uppercase; font-size: 0.72rem;
+    color: var(--text-dim); letter-spacing: 0.05em; margin-bottom: 0; }
+  .ov-toolbar select { width: auto; min-width: 130px; }
+  .ov-toolbar button {
+    background: var(--surface2); color: var(--text); border: 1px solid var(--border);
+    padding: 0.3rem 0.75rem; border-radius: 4px; cursor: pointer; font-size: 0.85rem;
+  }
+  .ov-toolbar button:hover { border-color: var(--accent); }
+
+  #ov-stats {
+    padding: 0.45rem 1rem; background: var(--surface); border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;
+    flex-shrink: 0; min-height: 2.4rem;
+  }
+  .ov-stat-bar {
+    display: flex; height: 1.35rem; border-radius: 4px; overflow: hidden;
+    flex: 1; min-width: 160px; max-width: 520px;
+  }
+  .ov-stat-seg {
+    height: 100%; display: flex; align-items: center; justify-content: center;
+    font-size: 0.66rem; font-weight: 700; color: #fff;
+    white-space: nowrap; overflow: hidden; transition: width 0.25s;
+  }
+  .ov-stat-legend { display: flex; flex-wrap: wrap; gap: 0.3rem 0.65rem; font-size: 0.78rem; }
+  .ov-stat-legend-item { display: flex; align-items: center; gap: 0.3rem; }
+  .ov-stat-swatch { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
+  .ov-stat-label { color: var(--text-dim); }
+  .ov-stat-pct   { color: var(--text); font-weight: 600; }
+
+  #ov-grid { flex: 1; overflow-y: auto; padding: 1rem; background: var(--bg); }
+  .ov-cells { display: flex; flex-wrap: wrap; gap: 3px; align-content: flex-start; }
+  .ov-cell {
+    width: 18px; height: 18px; border-radius: 3px; cursor: pointer;
+    transition: opacity 0.15s, transform 0.1s; flex-shrink: 0;
+  }
+  .ov-cell:hover { transform: scale(1.35); z-index: 10; position: relative; }
+  .ov-doc-sep {
+    width: 2px; height: 18px; background: var(--border); flex-shrink: 0;
+    margin: 0 4px; border-radius: 1px;
+  }
+  .ov-cell.dimmed      { opacity: 0.1; }
+  .ov-cell.highlighted { opacity: 1; }
+
+  .ov-tooltip {
+    position: fixed; background: #111; color: #eee; font-size: 0.75rem;
+    padding: 0.35rem 0.6rem; border-radius: 5px; pointer-events: none;
+    z-index: 9999; white-space: nowrap; border: 1px solid var(--border); display: none;
+  }
+
+  /* Language palette */
+  .ov-lang-dutch   { background: #3b82f6; }
+  .ov-lang-french  { background: #22c55e; }
+  .ov-lang-latin   { background: #f59e0b; }
+  .ov-lang-unknown { background: #6b7280; }
+  .ov-lang-other   { background: #a855f7; }
+
+  /* Category palette */
+  .ov-cat-petitie    { background: #14b8a6; }
+  .ov-cat-sollicitatie { background: #f97316; }
+  .ov-cat-appostille { background: #ec4899; }
+  .ov-cat-rapport    { background: #6366f1; }
+  .ov-cat-bijlage    { background: #84cc16; }
+  .ov-cat-attest     { background: #ef4444; }
+  .ov-cat-andere     { background: #6b7280; }
+  .ov-cat-unknown    { background: #374151; }
+
+  /* Boolean palette */
+  .ov-bool-true    { background: #4caf50; }
+  .ov-bool-false   { background: #374151; }
+  .ov-bool-unknown { background: #6b7280; }
 </style>
 </head>
 <body>
@@ -139,6 +225,7 @@
   <button class="tab-btn" data-tab="ask">Ask</button>
   <button class="tab-btn" data-tab="query">Query</button>
   <button class="tab-btn" data-tab="ingest">Ingest</button>
+  <button class="tab-btn" data-tab="overview">Overview</button>
   <button class="tab-btn" data-tab="review">Review</button>
 </div>
 
@@ -270,11 +357,73 @@
     "></pre>
   </div>
 
+  <!-- OVERVIEW TAB -->
+  <div id="tab-overview" class="tab-panel">
+
+    <div class="ov-toolbar">
+      <label for="ov-collection">Collection</label>
+      <select id="ov-collection">
+        <option value="">— loading —</option>
+      </select>
+
+      <label for="ov-color-by">Color by</label>
+      <select id="ov-color-by">
+        <option value="language">Language</option>
+        <option value="category">Category</option>
+        <option value="is_job_application">Job application</option>
+        <option value="military_service_argument">Military service</option>
+      </select>
+
+      <label for="ov-filter-language">Language</label>
+      <select id="ov-filter-language">
+        <option value="">All</option>
+        <option value="Dutch">Dutch</option>
+        <option value="French">French</option>
+        <option value="Latin">Latin</option>
+        <option value="unknown">Unknown</option>
+      </select>
+
+      <label for="ov-filter-category">Category</label>
+      <select id="ov-filter-category">
+        <option value="">All</option>
+        <option value="Petitie">Petitie</option>
+        <option value="Sollicitatie">Sollicitatie</option>
+        <option value="Appostille/addendum">Appostille/addendum</option>
+        <option value="Rapport">Rapport</option>
+        <option value="Bijlage">Bijlage</option>
+        <option value="Attest">Attest</option>
+        <option value="Andere">Andere</option>
+      </select>
+
+      <label for="ov-filter-job">Job application</label>
+      <select id="ov-filter-job">
+        <option value="">Any</option>
+        <option value="true">Yes</option>
+        <option value="false">No</option>
+      </select>
+
+      <label for="ov-filter-mil">Military service</label>
+      <select id="ov-filter-mil">
+        <option value="">Any</option>
+        <option value="true">Yes</option>
+        <option value="false">No</option>
+      </select>
+
+      <button type="button" id="ov-refresh">Refresh</button>
+    </div>
+
+    <div id="ov-stats"></div>
+    <div id="ov-grid"><div class="empty">Loading overview…</div></div>
+
+  </div>
+
   <!-- REVIEW TAB -->
   <div id="tab-review" class="tab-panel">
     <div class="review-toolbar">
-      <label for="rv-source">Document</label>
-      <select id="rv-source"><option value="">Select document…</option></select>
+      <label for="rv-collection">Collection</label>
+      <select id="rv-collection"><option value="">Select collection…</option></select>
+      <label for="rv-document">Document</label>
+      <select id="rv-document" disabled><option value="">—</option></select>
       <button id="rv-prev" disabled>&#8592;</button>
       <span id="rv-page-label">—</span>
       <button id="rv-next" disabled>&#8594;</button>
@@ -282,7 +431,7 @@
     <div id="rv-meta-strip" class="hidden"></div>
     <div class="review-grid">
       <div class="review-panel">
-        <div class="review-panel-header">Original Image</div>
+        <div class="review-panel-header">Original Image<span class="rv-zoom-controls"><button id="rv-zoom-out" title="Zoom out">−</button><button id="rv-zoom-reset" title="Reset zoom">⊙</button><button id="rv-zoom-in" title="Zoom in">+</button></span></div>
         <div class="review-panel-body" id="rv-image-panel"><div class="empty">Select a document and page.</div></div>
       </div>
       <div class="review-panel">
@@ -304,10 +453,11 @@
         </div>
       </div>
     </div>
+    <div class="rv-footer"></div>
   </div>
 
 </main>
-
+<div id="ov-tooltip" class="ov-tooltip"></div>
 <script src="/static/app.js"></script>
 </body>
 </html>
