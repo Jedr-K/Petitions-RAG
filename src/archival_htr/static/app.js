@@ -25,18 +25,37 @@ async function apiFetch(url, body) {
 }
 
 // ── Tab switching ─────────────────────────────────────────────────────────────
+function switchTab(name) {
+  const valid = ['search', 'ask', 'query', 'ingest', 'overview', 'review'];
+  if (!valid.includes(name)) name = 'search';
+
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+
+  const btn = document.querySelector(`[data-tab="${name}"]`);
+  btn.classList.add('active');
+  document.getElementById('tab-' + name).classList.add('active');
+
+  const isReview   = name === 'review';
+  const isOverview = name === 'overview';
+  document.querySelector('main').classList.toggle('review-active', isReview || isOverview);
+
+  if (isReview   && !rvLoaded) { rvLoadCollections(); rvLoaded = true; }
+  if (isOverview && !ovLoaded) { ovLoad(); ovLoaded = true; }
+}
+
 document.querySelectorAll('.tab-btn').forEach(btn => {
   btn.addEventListener('click', () => {
-    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-    btn.classList.add('active');
-    document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
-    const isReview   = btn.dataset.tab === 'review';
-    const isOverview = btn.dataset.tab === 'overview';
-    document.querySelector('main').classList.toggle('review-active', isReview || isOverview);
-    if (isReview   && !rvLoaded) { rvLoadCollections(); rvLoaded = true; }
-    if (isOverview && !ovLoaded) { ovLoad(); ovLoaded = true; }
+    const name = btn.dataset.tab;
+    if (window.location.hash !== '#' + name) {
+      history.pushState(null, '', '#' + name);
+    }
+    switchTab(name);
   });
+});
+
+window.addEventListener('hashchange', () => {
+  switchTab(window.location.hash.slice(1));
 });
 
 // ── Slider labels ─────────────────────────────────────────────────────────────
@@ -231,11 +250,12 @@ let rvPages = [];
 let rvPageIdx = 0;
 let rvCurrentCollection = '';
 let rvCurrentDocument = '';
+let rvCurrentMeta = null;
 let rvZoom = 1.0;
 let rvZoomMin = 0.1;
 let rvImgNaturalW = 0;
 let rvImgNaturalH = 0;
-const RV_ZOOM_STEP = 0.25;
+const RV_ZOOM_STEP = 0.1;
 const RV_ZOOM_MAX  = 4.0;
 function rvApplyZoom() {
   const panel = document.getElementById('rv-image-panel');
@@ -246,6 +266,8 @@ function rvApplyZoom() {
   const vh = rvImgNaturalH * rvZoom;
   wrap.style.width  = vw + 'px';
   wrap.style.height = vh + 'px';
+  wrap.style.marginLeft = Math.max(0, (panel.clientWidth  - vw) / 2) + 'px';
+  wrap.style.marginTop  = Math.max(0, (panel.clientHeight - vh) / 2) + 'px';
   img.style.transform = 'scale(' + rvZoom + ')';
 }
 function rvComputeZoomMin() {
@@ -348,12 +370,51 @@ function rvClearPanels() {
   ed.disabled = true;
   document.getElementById('rv-save').disabled = true;
   document.getElementById('rv-save-status').textContent = '';
-  rvRenderMeta(null);
+  rvCurrentMeta = null;
+  document.getElementById('rv-meta-strip').className = 'hidden';
+  document.getElementById('rv-meta-edit-form').classList.remove('open');
+  document.getElementById('rv-meta-save-status').textContent = '';
 }
 
 function rvRenderMeta(meta) {
   const strip = document.getElementById('rv-meta-strip');
-  if (!meta) { strip.className = 'hidden'; return; }
+  rvCurrentMeta = meta;
+  document.getElementById('rv-meta-edit-form').classList.remove('open');
+  document.getElementById('rv-meta-save-status').textContent = '';
+  if (!meta) {
+    // No metadata on file yet — show a minimal strip with an "Add" button
+    ['rv-edit-language','rv-edit-date','rv-edit-relation'].forEach(id => {
+      document.getElementById(id).value = '';
+    });
+    ['rv-edit-category','rv-edit-scope','rv-edit-job','rv-edit-mil',
+     'rv-edit-construction','rv-edit-gender','rv-edit-petition-type'].forEach(id => {
+      document.getElementById(id).value = '';
+    });
+    strip.innerHTML = '<button id="rv-meta-edit-btn" style="margin-left:0">&#9998; Add metadata</button>';
+    strip.className = '';
+    document.getElementById('rv-meta-edit-btn').addEventListener('click', () => {
+      document.getElementById('rv-meta-edit-form').classList.add('open');
+    });
+    return;
+  }
+
+  // Populate edit form inputs with current values
+  document.getElementById('rv-edit-language').value = meta.language || '';
+  document.getElementById('rv-edit-category').value = meta.category || '';
+  document.getElementById('rv-edit-date').value = meta.date_submission_writing || '';
+  document.getElementById('rv-edit-scope').value = meta.single_page_or_part || '';
+  document.getElementById('rv-edit-relation').value = meta.related_to_others || '';
+  document.getElementById('rv-edit-job').value =
+    meta.is_job_application === null || meta.is_job_application === undefined
+      ? '' : String(meta.is_job_application);
+  document.getElementById('rv-edit-mil').value =
+    meta.military_service_argument === null || meta.military_service_argument === undefined
+      ? '' : String(meta.military_service_argument);
+  document.getElementById('rv-edit-construction').value =
+    meta.construction_works === null || meta.construction_works === undefined
+      ? '' : String(meta.construction_works);
+  document.getElementById('rv-edit-gender').value       = meta.petitioner_gender || '';
+  document.getElementById('rv-edit-petition-type').value = meta.petition_type || '';
 
   function item(label, valueHtml) {
     return '<span class="rv-meta-item"><span class="rv-meta-label">' +
@@ -372,11 +433,21 @@ function rvRenderMeta(meta) {
   if (meta.date_submission_writing) html += item('Date',     txt(meta.date_submission_writing));
   if (meta.single_page_or_part)     html += item('Scope',    txt(meta.single_page_or_part));
   if (meta.related_to_others)       html += item('Relation', txt(meta.related_to_others));
-  html += bool('Job application',  meta.is_job_application);
-  html += bool('Military service', meta.military_service_argument);
+  if (meta.petitioner_gender && meta.petitioner_gender !== 'unknown')
+    html += item('Gender', txt(meta.petitioner_gender));
+  if (meta.petition_type && meta.petition_type !== 'other')
+    html += item('Petition type', txt(meta.petition_type));
+  html += bool('Job application',    meta.is_job_application);
+  html += bool('Military service',   meta.military_service_argument);
+  html += bool('Construction works', meta.construction_works);
 
-  strip.innerHTML = html || '<span class="rv-meta-none">No metadata fields available</span>';
+  html += '<button id="rv-meta-edit-btn" title="Edit metadata">&#9998;</button>';
+  strip.innerHTML = html || '<span class="rv-meta-none">No metadata — <button id="rv-meta-edit-btn" title="Add metadata">&#9998; Add</button></span>';
   strip.className = '';
+
+  document.getElementById('rv-meta-edit-btn').addEventListener('click', () => {
+    document.getElementById('rv-meta-edit-form').classList.add('open');
+  });
 }
 
 async function rvLoadPage(idx) {
@@ -518,25 +589,96 @@ document.getElementById('rv-save').addEventListener('click', async () => {
   }
 });
 
+document.getElementById('rv-meta-cancel-btn').addEventListener('click', () => {
+  document.getElementById('rv-meta-edit-form').classList.remove('open');
+  document.getElementById('rv-meta-save-status').textContent = '';
+  // Reset form inputs back to the last loaded metadata
+  if (rvCurrentMeta) rvRenderMeta(rvCurrentMeta);
+});
+
+document.getElementById('rv-edit-scope').addEventListener('change', function () {
+  const rel = document.getElementById('rv-edit-relation');
+  if (this.value === 'single document') {
+    rel.value = 'standalone';
+  } else if (this.value === 'part of dossier' && (!rel.value || rel.value === 'standalone')) {
+    rel.value = 'attached to ';
+  }
+});
+
+document.getElementById('rv-meta-save-btn').addEventListener('click', async () => {
+  if (!rvCurrentCollection || !rvCurrentDocument || rvPages.length === 0) return;
+  const stem = rvPages[rvPageIdx].stem;
+  const base = '/api/review/' + encodeURIComponent(rvCurrentCollection) +
+               '/' + encodeURIComponent(rvCurrentDocument) +
+               '/' + encodeURIComponent(stem);
+  const statusEl = document.getElementById('rv-meta-save-status');
+  statusEl.style.color = 'var(--text-dim)';
+  statusEl.textContent = 'Saving…';
+
+  const jobVal = document.getElementById('rv-edit-job').value;
+  const milVal = document.getElementById('rv-edit-mil').value;
+  const body = {
+    language:                  document.getElementById('rv-edit-language').value.trim() || null,
+    category:                  document.getElementById('rv-edit-category').value || null,
+    date_submission_writing:   document.getElementById('rv-edit-date').value.trim() || null,
+    single_page_or_part:       document.getElementById('rv-edit-scope').value || null,
+    related_to_others:         document.getElementById('rv-edit-relation').value.trim() || null,
+    is_job_application:        jobVal === '' ? null : jobVal === 'true',
+    military_service_argument: milVal === '' ? null : milVal === 'true',
+    construction_works:        (() => { const v = document.getElementById('rv-edit-construction').value; return v === '' ? null : v === 'true'; })(),
+    petitioner_gender:         document.getElementById('rv-edit-gender').value || null,
+    petition_type:             document.getElementById('rv-edit-petition-type').value || null,
+  };
+  try {
+    const resp = await fetch(base + '/metadata', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (resp.ok) {
+      const saved = await resp.json();
+      statusEl.style.color = 'var(--success)';
+      statusEl.textContent = 'Saved ✓';
+      setTimeout(() => { statusEl.textContent = ''; }, 2000);
+      rvRenderMeta(saved);
+    } else {
+      const d = await resp.json().catch(() => ({}));
+      statusEl.style.color = 'var(--accent)';
+      statusEl.textContent = d.detail || 'Save failed';
+    }
+  } catch (err) {
+    statusEl.style.color = 'var(--accent)';
+    statusEl.textContent = 'Error: ' + err.message;
+  }
+});
+
 // ── Overview ──────────────────────────────────────────────────────────────────
-let ovLoaded = false;
-let ovPages  = [];
+let ovLoaded    = false;
+let ovPages     = [];
+let ovSortByDate = false;
+let ovSampleDocs   = null;   // null until first fetch; {col: [docIds]} after
+let ovSampleActive = false;
+
+function parseSortableDate(str) {
+  if (!str) return Infinity;
+  const m = str.match(/\b([0-9]{3,4})\b/);
+  return m ? parseInt(m[1], 10) : Infinity;
+}
 
 const OV_LANG_CLASS = {
   dutch:   'ov-lang-dutch',
   french:  'ov-lang-french',
   latin:   'ov-lang-latin',
+  english: 'ov-lang-english',
+  german:  'ov-lang-german',
   unknown: 'ov-lang-unknown',
 };
 
 const OV_CAT_CLASS = {
-  'petitie':             'ov-cat-petitie',
-  'sollicitatie':        'ov-cat-sollicitatie',
-  'appostille/addendum': 'ov-cat-appostille',
-  'rapport':             'ov-cat-rapport',
-  'bijlage':             'ov-cat-bijlage',
-  'attest':              'ov-cat-attest',
-  'andere':              'ov-cat-andere',
+  'petition':    'ov-cat-petitie',
+  'apostille':   'ov-cat-appostille',
+  'attachement': 'ov-cat-bijlage',
+  'other':       'ov-cat-andere',
 };
 
 function ovCellClass(page, colorBy) {
@@ -548,36 +690,56 @@ function ovCellClass(page, colorBy) {
     const k = (page.category || 'unknown').toLowerCase();
     return OV_CAT_CLASS[k] || 'ov-cat-unknown';
   }
-  if (colorBy === 'is_job_application') {
-    if (page.is_job_application === true)  return 'ov-bool-true';
-    if (page.is_job_application === false) return 'ov-bool-false';
+  if (colorBy === 'petitioner_gender') {
+    const g = (page.petitioner_gender || 'unknown').toLowerCase();
+    if (g === 'male')   return 'ov-gender-male';
+    if (g === 'female') return 'ov-gender-female';
     return 'ov-bool-unknown';
   }
-  if (colorBy === 'military_service_argument') {
-    if (page.military_service_argument === true)  return 'ov-bool-true';
-    if (page.military_service_argument === false) return 'ov-bool-false';
-    return 'ov-bool-unknown';
+  if (colorBy === 'petition_type') {
+    return 'ov-pt-' + (page.petition_type || 'other').toLowerCase().replace(/[^a-z]/g, '-');
   }
-  return 'ov-lang-unknown';
+  // boolean fields
+  const boolVal = colorBy === 'is_job_application'        ? page.is_job_application
+                : colorBy === 'military_service_argument' ? page.military_service_argument
+                : colorBy === 'construction_works'        ? page.construction_works
+                : null;
+  if (boolVal === true)  return 'ov-bool-true';
+  if (boolVal === false) return 'ov-bool-false';
+  return 'ov-bool-unknown';
 }
 
 function ovGetSwatchClass(colorBy, key) {
   if (colorBy === 'language') return OV_LANG_CLASS[key.toLowerCase()] || 'ov-lang-other';
   if (colorBy === 'category') return OV_CAT_CLASS[key.toLowerCase()]  || 'ov-cat-unknown';
+  if (colorBy === 'petitioner_gender') {
+    if (key.toLowerCase() === 'male')   return 'ov-gender-male';
+    if (key.toLowerCase() === 'female') return 'ov-gender-female';
+    return 'ov-bool-unknown';
+  }
+  if (colorBy === 'petition_type') {
+    return 'ov-pt-' + key.toLowerCase().replace(/[^a-z]/g, '-');
+  }
   if (key === 'true')  return 'ov-bool-true';
   if (key === 'false') return 'ov-bool-false';
   return 'ov-bool-unknown';
 }
 
 function ovMatchesFilter(page) {
-  const fl = document.getElementById('ov-filter-language').value;
-  const fc = document.getElementById('ov-filter-category').value;
-  const fj = document.getElementById('ov-filter-job').value;
-  const fm = document.getElementById('ov-filter-mil').value;
-  if (fl && (page.language || '').toLowerCase() !== fl.toLowerCase()) return false;
-  if (fc && (page.category || '').toLowerCase() !== fc.toLowerCase()) return false;
-  if (fj && page.is_job_application !== (fj === 'true')) return false;
-  if (fm && page.military_service_argument !== (fm === 'true')) return false;
+  const fl  = document.getElementById('ov-filter-language').value;
+  const fc  = document.getElementById('ov-filter-category').value;
+  const fj  = document.getElementById('ov-filter-job').value;
+  const fm  = document.getElementById('ov-filter-mil').value;
+  const fco = document.getElementById('ov-filter-construction').value;
+  const fg  = document.getElementById('ov-filter-gender').value;
+  const fpt = document.getElementById('ov-filter-petition-type').value;
+  if (fl  && (page.language         || '').toLowerCase() !== fl.toLowerCase())  return false;
+  if (fc  && (page.category         || '').toLowerCase() !== fc.toLowerCase())  return false;
+  if (fj  && page.is_job_application        !== (fj  === 'true')) return false;
+  if (fm  && page.military_service_argument !== (fm  === 'true')) return false;
+  if (fco && page.construction_works        !== (fco === 'true')) return false;
+  if (fg  && (page.petitioner_gender || '').toLowerCase() !== fg.toLowerCase()) return false;
+  if (fpt && (page.petition_type     || '').toLowerCase() !== fpt.toLowerCase()) return false;
   return true;
 }
 
@@ -639,31 +801,45 @@ function ovRender() {
     return p.source_page;
   }
 
-  // Sort: by doc, then by sortKey within doc → cells flow in continuous rows,
-  // with same-type pages clustering visually within each document.
-  const sorted = [...visible].sort((a, b) => {
-    if (a.source_doc !== b.source_doc) return a.source_doc.localeCompare(b.source_doc);
-    return sortKey(a).localeCompare(sortKey(b));
-  });
+  // Group pages by document; render each doc as its own card.
+  const byDoc = {};
+  for (const p of visible) {
+    if (!byDoc[p.source_doc]) byDoc[p.source_doc] = [];
+    byDoc[p.source_doc].push(p);
+  }
+  let docNames = Object.keys(byDoc).sort();
+  if (ovSortByDate) {
+    docNames.sort((a, b) => {
+      const aDate = Math.min(...byDoc[a].map(p => parseSortableDate(p.date_submission_writing)));
+      const bDate = Math.min(...byDoc[b].map(p => parseSortableDate(p.date_submission_writing)));
+      return aDate - bDate;
+    });
+  }
 
   let html = '<div class="ov-cells">';
-  let prevDoc = null;
-  for (const p of sorted) {
-    if (prevDoc !== null && p.source_doc !== prevDoc) {
-      html += '<div class="ov-doc-sep" title="' + esc(p.source_doc) + '"></div>';
+  for (const docName of docNames) {
+    const pages = [...byDoc[docName]].sort((a, b) => sortKey(a).localeCompare(sortKey(b)));
+    html += '<div class="ov-doc-group" data-col="' + esc(pages[0].collection) + '" data-doc="' + esc(docName) + '">';
+    html += '<div class="ov-doc-tag" title="' + esc(docName) + '">' + esc(docName) + '</div>';
+    html += '<div class="ov-doc-cells">';
+    for (const p of pages) {
+      const cls = ovCellClass(p, colorBy);
+      const bStr = v => v === null || v === undefined ? '' : String(v);
+      html += '<div class="ov-cell ' + cls + '"' +
+              ' data-col="'          + esc(p.collection)  + '"' +
+              ' data-doc="'          + esc(p.source_doc)  + '"' +
+              ' data-page="'         + esc(p.source_page) + '"' +
+              ' data-lang="'         + esc(p.language  || '') + '"' +
+              ' data-cat="'          + esc(p.category  || '') + '"' +
+              ' data-date="'         + esc(p.date_submission_writing || '') + '"' +
+              ' data-gender="'       + esc(p.petitioner_gender || '') + '"' +
+              ' data-petition-type="'+ esc(p.petition_type || '') + '"' +
+              ' data-job="'          + bStr(p.is_job_application)        + '"' +
+              ' data-mil="'          + bStr(p.military_service_argument) + '"' +
+              ' data-construction="' + bStr(p.construction_works)        + '"' +
+              '></div>';
     }
-    prevDoc = p.source_doc;
-    const cls = ovCellClass(p, colorBy);
-    html += '<div class="ov-cell ' + cls + '"' +
-            ' data-col="'  + esc(p.collection)  + '"' +
-            ' data-doc="'  + esc(p.source_doc)  + '"' +
-            ' data-page="' + esc(p.source_page) + '"' +
-            ' data-lang="' + esc(p.language  || '') + '"' +
-            ' data-cat="'  + esc(p.category  || '') + '"' +
-            ' data-date="' + esc(p.date_submission_writing || '') + '"' +
-            ' data-job="'  + (p.is_job_application      === null ? '' : String(p.is_job_application))      + '"' +
-            ' data-mil="'  + (p.military_service_argument === null ? '' : String(p.military_service_argument)) + '"' +
-            '></div>';
+    html += '</div></div>';
   }
   html += '</div>';
   grid.innerHTML = html;
@@ -674,14 +850,43 @@ function ovRender() {
   grid.addEventListener('click',      ovHandleClick);
 
   ovApplyFilter();
+  if (ovSampleActive) ovApplySample();
 }
+
+async function ovLoadSample() {
+  if (ovSampleDocs !== null) return;
+  const data = await fetch('/api/sample').then(r => r.json());
+  ovSampleDocs = data.samples;
+}
+
+function ovApplySample() {
+  document.querySelectorAll('.ov-doc-group').forEach(group => {
+    if (!ovSampleActive || !ovSampleDocs) {
+      group.classList.remove('sampled');
+      return;
+    }
+    const col = group.dataset.col;
+    const doc = group.dataset.doc;
+    group.classList.toggle('sampled', (ovSampleDocs[col] || []).includes(doc));
+  });
+  document.getElementById('ov-highlight-sample').classList.toggle('active', ovSampleActive);
+}
+
+document.getElementById('ov-highlight-sample').addEventListener('click', async () => {
+  await ovLoadSample();
+  ovSampleActive = !ovSampleActive;
+  ovApplySample();
+});
 
 function ovApplyFilter() {
   const anyFilter = (
     document.getElementById('ov-filter-language').value ||
     document.getElementById('ov-filter-category').value ||
     document.getElementById('ov-filter-job').value ||
-    document.getElementById('ov-filter-mil').value
+    document.getElementById('ov-filter-mil').value ||
+    document.getElementById('ov-filter-construction').value ||
+    document.getElementById('ov-filter-gender').value ||
+    document.getElementById('ov-filter-petition-type').value
   );
 
   document.querySelectorAll('.ov-cell').forEach(cell => {
@@ -689,11 +894,15 @@ function ovApplyFilter() {
       cell.classList.remove('dimmed', 'highlighted');
       return;
     }
+    const b = v => v === 'true' ? true : v === 'false' ? false : null;
     const pseudo = {
-      language:                  cell.dataset.lang || null,
-      category:                  cell.dataset.cat  || null,
-      is_job_application:        cell.dataset.job === 'true' ? true : cell.dataset.job === 'false' ? false : null,
-      military_service_argument: cell.dataset.mil === 'true' ? true : cell.dataset.mil === 'false' ? false : null,
+      language:                  cell.dataset.lang         || null,
+      category:                  cell.dataset.cat          || null,
+      petitioner_gender:         cell.dataset.gender       || null,
+      petition_type:             cell.dataset.petitionType || null,
+      is_job_application:        b(cell.dataset.job),
+      military_service_argument: b(cell.dataset.mil),
+      construction_works:        b(cell.dataset.construction),
     };
     if (ovMatchesFilter(pseudo)) {
       cell.classList.add('highlighted');
@@ -711,30 +920,41 @@ function ovUpdateStats() {
   const colorBy = document.getElementById('ov-color-by').value;
   const active  = ovVisiblePages().filter(ovMatchesFilter);
 
-  if (active.length === 0) {
-    statsEl.innerHTML = '<span class="rv-meta-none">No pages match the current filter.</span>';
+  const visible = ovVisiblePages();
+  if (visible.length === 0) {
+    statsEl.innerHTML = '<span class="rv-meta-none">No pages.</span>';
     return;
   }
 
   const counts = {};
   for (const p of active) {
     let key;
-    if      (colorBy === 'language')                  key = p.language || 'unknown';
-    else if (colorBy === 'category')                  key = p.category || 'unknown';
-    else if (colorBy === 'is_job_application')        key = p.is_job_application === null ? 'unknown' : String(p.is_job_application);
-    else                                              key = p.military_service_argument === null ? 'unknown' : String(p.military_service_argument);
+    if      (colorBy === 'language')                  key = p.language          || 'unknown';
+    else if (colorBy === 'category')                  key = p.category          || 'unknown';
+    else if (colorBy === 'petitioner_gender')         key = p.petitioner_gender || 'unknown';
+    else if (colorBy === 'petition_type')             key = p.petition_type     || 'other';
+    else if (colorBy === 'is_job_application')        key = p.is_job_application        == null ? 'unknown' : String(p.is_job_application);
+    else if (colorBy === 'military_service_argument') key = p.military_service_argument == null ? 'unknown' : String(p.military_service_argument);
+    else if (colorBy === 'construction_works')        key = p.construction_works        == null ? 'unknown' : String(p.construction_works);
+    else                                              key = 'unknown';
     counts[key] = (counts[key] || 0) + 1;
   }
 
   const total  = active.length;
   const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
 
+  const filtered = active.length !== visible.length;
+  let totalHtml = '<div class="ov-stat-total"><b>' + total + '</b> page' +
+    (total === 1 ? '' : 's') +
+    (filtered ? ' <span style="opacity:0.7">(of ' + visible.length + ' in collection)</span>' : '') +
+    '</div>';
+
   let barHtml = '<div class="ov-stat-bar">';
   for (const [key, cnt] of sorted) {
     const pct = cnt / total * 100;
     const cls = ovGetSwatchClass(colorBy, key);
     barHtml += '<div class="ov-stat-seg ' + cls + '" style="width:' + pct.toFixed(2) + '%">' +
-               (pct > 5 ? pct.toFixed(1) + '%' : '') + '</div>';
+               (pct > 8 ? pct.toFixed(0) + '%' : '') + '</div>';
   }
   barHtml += '</div>';
 
@@ -742,15 +962,16 @@ function ovUpdateStats() {
   for (const [key, cnt] of sorted) {
     const pct = (cnt / total * 100).toFixed(1);
     const cls = ovGetSwatchClass(colorBy, key);
-    legendHtml += '<span class="ov-stat-legend-item">' +
+    legendHtml += '<div class="ov-stat-legend-item">' +
       '<span class="ov-stat-swatch ' + cls + '"></span>' +
-      '<span class="ov-stat-label">' + esc(key) + ' </span>' +
+      '<span class="ov-stat-label" title="' + esc(key) + '">' + esc(key) + '</span>' +
+      '<span class="ov-stat-count">' + cnt + '</span>' +
       '<span class="ov-stat-pct">' + pct + '%</span>' +
-      '</span>';
+      '</div>';
   }
   legendHtml += '</div>';
 
-  statsEl.innerHTML = barHtml + legendHtml;
+  statsEl.innerHTML = totalHtml + barHtml + legendHtml;
 }
 
 function ovHandleMouseMove(e) {
@@ -760,9 +981,12 @@ function ovHandleMouseMove(e) {
 
   const parts = [
     cell.dataset.doc + ' / ' + cell.dataset.page,
-    cell.dataset.lang ? 'Language: '  + cell.dataset.lang : null,
-    cell.dataset.cat  ? 'Category: '  + cell.dataset.cat  : null,
-    cell.dataset.date ? 'Date: '      + cell.dataset.date : null,
+    cell.dataset.lang         ? 'Lang: '          + cell.dataset.lang         : null,
+    cell.dataset.cat          ? 'Category: '      + cell.dataset.cat          : null,
+    cell.dataset.date         ? 'Date: '          + cell.dataset.date         : null,
+    cell.dataset.gender       ? 'Gender: '        + cell.dataset.gender       : null,
+    cell.dataset.petitionType ? 'Type: '          + cell.dataset.petitionType : null,
+    cell.dataset.construction === 'true' ? 'Construction works' : null,
   ].filter(Boolean);
 
   tip.textContent = parts.join('  |  ');
@@ -778,13 +1002,8 @@ function ovHandleClick(e) {
 }
 
 async function ovNavigateToReview(collection, doc, page) {
-  // Switch tab
-  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-  const reviewBtn = document.querySelector('[data-tab=review]');
-  reviewBtn.classList.add('active');
-  document.getElementById('tab-review').classList.add('active');
-  document.querySelector('main').classList.add('review-active');
+  history.pushState(null, '', '#review');
+  switchTab('review');
 
   if (!rvLoaded) { await rvLoadCollections(); rvLoaded = true; }
 
@@ -807,11 +1026,20 @@ document.getElementById('ov-collection').addEventListener('change', () => {
 document.getElementById('ov-color-by').addEventListener('change', () => {
   if (ovPages.length) { ovRender(); }
 });
-['ov-filter-language', 'ov-filter-category', 'ov-filter-job', 'ov-filter-mil'].forEach(id => {
+['ov-filter-language', 'ov-filter-category', 'ov-filter-job', 'ov-filter-mil',
+ 'ov-filter-construction', 'ov-filter-gender', 'ov-filter-petition-type'].forEach(id => {
   document.getElementById(id).addEventListener('change', () => { ovApplyFilter(); });
+});
+document.getElementById('ov-sort-date').addEventListener('click', () => {
+  ovSortByDate = !ovSortByDate;
+  document.getElementById('ov-sort-date').classList.toggle('active', ovSortByDate);
+  if (ovPages.length) { ovRender(); }
 });
 document.getElementById('ov-refresh').addEventListener('click', () => {
   ovLoaded = false;
   ovLoad();
   ovLoaded = true;
 });
+
+// ── Initial tab from URL hash ──────────────────────────────────────────────────
+switchTab(window.location.hash.slice(1) || 'search');

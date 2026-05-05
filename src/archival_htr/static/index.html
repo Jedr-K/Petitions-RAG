@@ -19,7 +19,7 @@
     --warn: #ff9800;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); height: 100vh; overflow: hidden; }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); height: 100vh; }
   header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 1rem 2rem; display: flex; align-items: center; gap: 1rem; }
   header h1 { font-size: 1.25rem; font-weight: 600; color: var(--text); letter-spacing: 0.02em; }
   header span { color: var(--text-dim); font-size: 0.85rem; }
@@ -29,6 +29,9 @@
   .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent2); }
   .tab-panel { display: none; }
   .tab-panel.active { display: block; }
+  .tab-desc { margin: 0 0 1.25rem; color: var(--muted, #888); font-size: 0.9rem; line-height: 1.55; }
+  .tabs-spacer { flex: 1; }
+  .tab-btn--admin { color: var(--text-dim); opacity: 0.6; font-size: 0.82rem; }
   main { max-width: 900px; margin: 0 auto; padding: 2rem; }
   main.review-active { max-width: none !important; padding: 0 !important; margin: 0 !important; }
   .form-row { margin-bottom: 1rem; }
@@ -105,10 +108,10 @@
   .rv-zoom-controls { display: flex; align-items: center; margin-left: auto; }
   .rv-zoom-controls button { background: var(--surface); border: 1px solid var(--border); border-radius: 3px; cursor: pointer; font-size: 0.9rem; line-height: 1; padding: 1px 7px; margin-left: 3px; color: var(--text); }
   .rv-zoom-controls button:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
-  #rv-image-panel { overflow: auto; display: flex; align-items: center; justify-content: center; cursor: grab; scrollbar-width: none; -ms-overflow-style: none; }
+  #rv-image-panel { overflow: auto; display: flex; align-items: flex-start; justify-content: flex-start; cursor: grab; scrollbar-width: none; -ms-overflow-style: none; }
   #rv-image-panel::-webkit-scrollbar { display: none; }
   .rv-img-wrap { display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-  #rv-image-panel img { transform-origin: center; transition: transform 0.15s ease; max-width: none; display: block; }
+  #rv-image-panel img { transform-origin: center; max-width: none; display: block; }
   .review-panel-body pre { white-space: pre-wrap; word-break: break-word; font-size: 0.8rem; line-height: 1.6; color: var(--text-dim); margin: 0; font-family: inherit; }
   #rv-finalized-panel { padding: 0; display: flex; flex-direction: column; }
   #rv-editor { flex: 1; width: 100%; background: var(--surface); border: none; color: var(--text); font-size: 0.8rem; line-height: 1.6; resize: none; padding: 0.75rem; font-family: inherit; min-height: 0; }
@@ -134,9 +137,36 @@
   .rv-meta-bool.yes { background: #1a3a1a; color: #6fcf6f; border: 1px solid #2d5a2d; }
   .rv-meta-bool.no  { background: #2a2a2a; color: #888;    border: 1px solid #3a3a3a; }
   .rv-meta-none { color: var(--text-dim); font-style: italic; }
+  #rv-meta-edit-btn {
+    margin-left: auto; background: none; border: 1px solid var(--border);
+    color: var(--text-dim); border-radius: 3px; cursor: pointer;
+    font-size: 0.75rem; padding: 0.1rem 0.5rem; line-height: 1.5; flex-shrink: 0;
+  }
+  #rv-meta-edit-btn:hover { color: var(--text); border-color: var(--text-dim); }
+  #rv-meta-edit-form {
+    display: none; flex-wrap: wrap; align-items: flex-end; gap: 0.5rem 0.75rem;
+    padding: 0.5rem 1rem; background: var(--surface); border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  #rv-meta-edit-form.open { display: flex; }
+  .rv-edit-field { display: flex; flex-direction: column; gap: 0.2rem; }
+  .rv-edit-field label { font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-dim); margin-bottom: 0; }
+  .rv-edit-field input, .rv-edit-field select {
+    width: auto; min-width: 100px; background: var(--surface2);
+    border: 1px solid var(--border); color: var(--text);
+    padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.8rem; font-family: inherit;
+  }
+  .rv-edit-actions { display: flex; gap: 0.4rem; align-items: flex-end; margin-left: auto; }
+  .rv-edit-actions button {
+    padding: 0.28rem 0.8rem; border-radius: 4px; font-size: 0.8rem;
+    cursor: pointer; border: 1px solid var(--border); font-weight: 600;
+  }
+  #rv-meta-save-btn { background: var(--accent); color: #fff; border-color: var(--accent); }
+  #rv-meta-cancel-btn { background: var(--surface2); color: var(--text); }
+  #rv-meta-save-status { font-size: 0.75rem; align-self: center; }
 
   /* ── Overview tab ── */
-  #tab-overview.active { display: flex !important; flex-direction: column; }
+  #tab-overview.active { display: flex !important; flex-direction: column; height: calc(100vh - 90px); }
   .ov-toolbar {
     display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;
     padding: 0.55rem 1rem; border-bottom: 1px solid var(--border);
@@ -150,40 +180,60 @@
     padding: 0.3rem 0.75rem; border-radius: 4px; cursor: pointer; font-size: 0.85rem;
   }
   .ov-toolbar button:hover { border-color: var(--accent); }
+  .ov-toolbar button.active { background: var(--accent); color: #fff; }
 
-  #ov-stats {
-    padding: 0.45rem 1rem; background: var(--surface); border-bottom: 1px solid var(--border);
-    display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;
-    flex-shrink: 0; min-height: 2.4rem;
+  #ov-body {
+    flex: 1; display: flex; min-height: 0; overflow: hidden;
   }
+  #ov-grid { flex: 1; overflow-y: auto; padding: 1rem; background: var(--bg); }
+  #ov-stats {
+    width: 280px; flex-shrink: 0; padding: 1rem;
+    background: var(--surface); border-left: 1px solid var(--border);
+    overflow-y: auto; display: flex; flex-direction: column; gap: 0.75rem;
+  }
+  .ov-stat-total { font-size: 0.78rem; color: var(--text-dim); }
+  .ov-stat-total b { color: var(--text); font-weight: 700; }
   .ov-stat-bar {
     display: flex; height: 1.35rem; border-radius: 4px; overflow: hidden;
-    flex: 1; min-width: 160px; max-width: 520px;
+    width: 100%;
   }
   .ov-stat-seg {
     height: 100%; display: flex; align-items: center; justify-content: center;
     font-size: 0.66rem; font-weight: 700; color: #fff;
     white-space: nowrap; overflow: hidden; transition: width 0.25s;
   }
-  .ov-stat-legend { display: flex; flex-wrap: wrap; gap: 0.3rem 0.65rem; font-size: 0.78rem; }
-  .ov-stat-legend-item { display: flex; align-items: center; gap: 0.3rem; }
-  .ov-stat-swatch { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
-  .ov-stat-label { color: var(--text-dim); }
-  .ov-stat-pct   { color: var(--text); font-weight: 600; }
+  .ov-stat-legend { display: flex; flex-direction: column; gap: 0.4rem; font-size: 0.8rem; }
+  .ov-stat-legend-item { display: flex; align-items: center; gap: 0.4rem; }
+  .ov-stat-swatch { width: 12px; height: 12px; border-radius: 2px; flex-shrink: 0; }
+  .ov-stat-label { color: var(--text-dim); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ov-stat-count { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .ov-stat-pct   { color: var(--text-dim); font-weight: 500; font-variant-numeric: tabular-nums; min-width: 3.2rem; text-align: right; }
 
-  #ov-grid { flex: 1; overflow-y: auto; padding: 1rem; background: var(--bg); }
-  .ov-cells { display: flex; flex-wrap: wrap; gap: 3px; align-content: flex-start; }
+  .ov-cells { display: flex; flex-wrap: wrap; gap: 8px; align-content: flex-start; align-items: flex-start; }
+  .ov-doc-group {
+    display: inline-flex; flex-direction: column; gap: 4px;
+    padding: 6px 8px; background: #f4f4f6;
+    border: 1px solid #e5e7eb; border-radius: 6px;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  .ov-doc-group:hover { border-color: #c7c9d1; background: #eeeef1; }
+  .ov-doc-tag {
+    font-size: 0.66rem; color: #4b5563; font-weight: 600;
+    letter-spacing: 0.03em; font-variant-numeric: tabular-nums;
+    white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis;
+  }
+  .ov-doc-tag .ov-doc-count { color: #1f2937; margin-left: 0.4em; opacity: 0.7; }
+  .ov-doc-cells { display: flex; flex-wrap: wrap; gap: 3px; max-width: 280px; }
   .ov-cell {
-    width: 18px; height: 18px; border-radius: 3px; cursor: pointer;
+    width: 22px; height: 22px; border-radius: 4px; cursor: pointer;
     transition: opacity 0.15s, transform 0.1s; flex-shrink: 0;
   }
-  .ov-cell:hover { transform: scale(1.35); z-index: 10; position: relative; }
-  .ov-doc-sep {
-    width: 2px; height: 18px; background: var(--border); flex-shrink: 0;
-    margin: 0 4px; border-radius: 1px;
-  }
+  .ov-cell:hover { transform: scale(1.3); z-index: 10; position: relative; }
   .ov-cell.dimmed      { opacity: 0.1; }
   .ov-cell.highlighted { opacity: 1; }
+
+  .ov-doc-group.sampled { background: #ffe944; }
+  #ov-highlight-sample.active { background: #ffe944; color: #333; }
 
   .ov-tooltip {
     position: fixed; background: #111; color: #eee; font-size: 0.75rem;
@@ -195,8 +245,10 @@
   .ov-lang-dutch   { background: #3b82f6; }
   .ov-lang-french  { background: #22c55e; }
   .ov-lang-latin   { background: #f59e0b; }
+  .ov-lang-english { background: #ef4444; }
+  .ov-lang-german  { background: #a855f7; }
   .ov-lang-unknown { background: #6b7280; }
-  .ov-lang-other   { background: #a855f7; }
+  .ov-lang-other   { background: #64748b; }
 
   /* Category palette */
   .ov-cat-petitie    { background: #14b8a6; }
@@ -212,6 +264,10 @@
   .ov-bool-true    { background: #4caf50; }
   .ov-bool-false   { background: #374151; }
   .ov-bool-unknown { background: #6b7280; }
+
+  /* Gender palette */
+  .ov-gender-male   { background: #3b82f6; }
+  .ov-gender-female { background: #ec4899; }
 </style>
 </head>
 <body>
@@ -224,15 +280,24 @@
   <button class="tab-btn active" data-tab="search">Search</button>
   <button class="tab-btn" data-tab="ask">Ask</button>
   <button class="tab-btn" data-tab="query">Query</button>
-  <button class="tab-btn" data-tab="ingest">Ingest</button>
   <button class="tab-btn" data-tab="overview">Overview</button>
   <button class="tab-btn" data-tab="review">Review</button>
+  <span class="tabs-spacer"></span>
+  <button class="tab-btn tab-btn--admin" data-tab="ingest">Ingest</button>
 </div>
 
 <main>
 
   <!-- SEARCH TAB -->
   <div id="tab-search" class="tab-panel active">
+    <p class="tab-desc">
+      Search performs vector similarity search across all indexed manuscript chunks.
+      Enter a phrase or topic and the index returns the most semantically related
+      passages, ranked by relevance score. Each result shows the source document,
+      a score bar, and a short excerpt. Use the <em>Results</em> slider to control
+      how many matches are returned, and the optional filters to narrow results to
+      a specific source document or metadata category.
+    </p>
     <form id="search-form">
       <div class="form-row">
         <label for="s-query">Search query</label>
@@ -247,7 +312,7 @@
         </div>
         <div class="form-row">
           <label for="s-source">Source filter (optional)</label>
-          <input type="text" id="s-source" placeholder="e.g. 14">
+          <input type="text" id="s-source" placeholder="e.g. 14  or  14/document_name">
         </div>
         <div class="form-row" style="grid-column: span 1"><!-- spacer --></div>
       </div>
@@ -276,6 +341,15 @@
 
   <!-- ASK TAB -->
   <div id="tab-ask" class="tab-panel">
+    <p class="tab-desc">
+      Ask extends Search by adding a language-model reasoning step. The index
+      retrieves the top N relevant chunks (controlled by the <em>Context chunks</em>
+      slider — more chunks means broader coverage but slower responses), then passes
+      them to the model, which reads them together and synthesises a single
+      natural-language answer. Use Ask when you want an interpreted response that
+      draws on evidence from across multiple documents, rather than a ranked list of
+      raw passages.
+    </p>
     <form id="ask-form">
       <div class="form-row">
         <label for="a-question">Question</label>
@@ -290,7 +364,7 @@
         </div>
         <div class="form-row">
           <label for="a-source">Source filter (optional)</label>
-          <input type="text" id="a-source" placeholder="e.g. 14">
+          <input type="text" id="a-source" placeholder="e.g. 14  or  14/document_name">
         </div>
         <div class="form-row"></div>
       </div>
@@ -319,6 +393,14 @@
 
   <!-- QUERY TAB -->
   <div id="tab-query" class="tab-panel">
+    <p class="tab-desc">
+      Query skips vector retrieval entirely. You select a specific source document
+      from the dropdown and the model answers your question using that document's
+      complete stored transcript as context. Unlike Ask, which samples the most
+      relevant chunks from anywhere in the index, Query gives the model access to
+      every word of the chosen document — making it the best choice when you already
+      know which petition to interrogate and want nothing left out.
+    </p>
     <form id="query-form">
       <div class="form-row">
         <label for="q-source">Source document</label>
@@ -370,8 +452,11 @@
       <select id="ov-color-by">
         <option value="language">Language</option>
         <option value="category">Category</option>
+        <option value="petition_type">Petition type</option>
+        <option value="petitioner_gender">Gender</option>
         <option value="is_job_application">Job application</option>
         <option value="military_service_argument">Military service</option>
+        <option value="construction_works">Construction works</option>
       </select>
 
       <label for="ov-filter-language">Language</label>
@@ -386,13 +471,10 @@
       <label for="ov-filter-category">Category</label>
       <select id="ov-filter-category">
         <option value="">All</option>
-        <option value="Petitie">Petitie</option>
-        <option value="Sollicitatie">Sollicitatie</option>
-        <option value="Appostille/addendum">Appostille/addendum</option>
-        <option value="Rapport">Rapport</option>
-        <option value="Bijlage">Bijlage</option>
-        <option value="Attest">Attest</option>
-        <option value="Andere">Andere</option>
+        <option value="petition">petition</option>
+        <option value="apostille">apostille</option>
+        <option value="attachement">attachement</option>
+        <option value="Other">Other</option>
       </select>
 
       <label for="ov-filter-job">Job application</label>
@@ -409,11 +491,41 @@
         <option value="false">No</option>
       </select>
 
+      <label for="ov-filter-construction">Construction works</label>
+      <select id="ov-filter-construction">
+        <option value="">Any</option>
+        <option value="true">Yes</option>
+        <option value="false">No</option>
+      </select>
+
+      <label for="ov-filter-gender">Gender</label>
+      <select id="ov-filter-gender">
+        <option value="">All</option>
+        <option value="Male">Male</option>
+        <option value="Female">Female</option>
+        <option value="unknown">Unknown</option>
+      </select>
+
+      <label for="ov-filter-petition-type">Petition type</label>
+      <select id="ov-filter-petition-type">
+        <option value="">All</option>
+        <option value="Request for financial aid">Request for financial aid</option>
+        <option value="Request for permission">Request for permission</option>
+        <option value="Request for certification">Request for certification</option>
+        <option value="Job application">Job application</option>
+        <option value="Complaint">Complaint</option>
+        <option value="other">other</option>
+      </select>
+
+      <button type="button" id="ov-sort-date" title="Sort document groups chronologically by earliest date">Sort by date</button>
       <button type="button" id="ov-refresh">Refresh</button>
+      <button type="button" id="ov-highlight-sample" title="Highlight documents included in the gewogen steekproef">Highlight sample</button>
     </div>
 
-    <div id="ov-stats"></div>
-    <div id="ov-grid"><div class="empty">Loading overview…</div></div>
+    <div id="ov-body">
+      <div id="ov-grid"><div class="empty">Loading overview…</div></div>
+      <div id="ov-stats"></div>
+    </div>
 
   </div>
 
@@ -429,6 +541,88 @@
       <button id="rv-next" disabled>&#8594;</button>
     </div>
     <div id="rv-meta-strip" class="hidden"></div>
+    <div id="rv-meta-edit-form">
+      <div class="rv-edit-field">
+        <label>Language</label>
+        <input type="text" id="rv-edit-language" placeholder="e.g. Dutch">
+      </div>
+      <div class="rv-edit-field">
+        <label>Category</label>
+        <select id="rv-edit-category">
+          <option value="">— unknown —</option>
+          <option value="petition">petition</option>
+          <option value="apostille">apostille</option>
+          <option value="attachement">attachement</option>
+          <option value="Other">Other</option>
+        </select>
+      </div>
+      <div class="rv-edit-field">
+        <label>Date</label>
+        <input type="text" id="rv-edit-date" placeholder="e.g. 1743">
+      </div>
+      <div class="rv-edit-field">
+        <label>Scope</label>
+        <select id="rv-edit-scope">
+          <option value="">— unknown —</option>
+          <option value="single document">single document</option>
+          <option value="part of dossier">part of dossier</option>
+        </select>
+      </div>
+      <div class="rv-edit-field">
+        <label>Relation</label>
+        <input type="text" id="rv-edit-relation" placeholder="standalone / attached to …">
+      </div>
+      <div class="rv-edit-field">
+        <label>Petitioner gender</label>
+        <select id="rv-edit-gender">
+          <option value="">— unknown —</option>
+          <option value="Male">Male</option>
+          <option value="Female">Female</option>
+          <option value="unknown">unknown</option>
+        </select>
+      </div>
+      <div class="rv-edit-field">
+        <label>Petition type</label>
+        <select id="rv-edit-petition-type">
+          <option value="">— unknown —</option>
+          <option value="Request for financial aid">Request for financial aid</option>
+          <option value="Request for permission">Request for permission</option>
+          <option value="Request for certification">Request for certification</option>
+          <option value="Job application">Job application</option>
+          <option value="Complaint">Complaint</option>
+          <option value="other">other</option>
+        </select>
+      </div>
+      <div class="rv-edit-field">
+        <label>Job application</label>
+        <select id="rv-edit-job">
+          <option value="">Unknown</option>
+          <option value="true">Yes</option>
+          <option value="false">No</option>
+        </select>
+      </div>
+      <div class="rv-edit-field">
+        <label>Military service</label>
+        <select id="rv-edit-mil">
+          <option value="">Unknown</option>
+          <option value="true">Yes</option>
+          <option value="false">No</option>
+        </select>
+      </div>
+      <div class="rv-edit-field">
+        <label>Construction works</label>
+        <select id="rv-edit-construction">
+          <option value="">Unknown</option>
+          <option value="true">Yes</option>
+          <option value="false">No</option>
+        </select>
+      </div>
+      <div class="rv-edit-actions">
+        <span id="rv-meta-save-status"></span>
+        <button type="button" id="rv-meta-cancel-btn">Cancel</button>
+        <button type="button" id="rv-meta-save-btn">Save</button>
+      </div>
+    </div>
     <div class="review-grid">
       <div class="review-panel">
         <div class="review-panel-header">Original Image<span class="rv-zoom-controls"><button id="rv-zoom-out" title="Zoom out">−</button><button id="rv-zoom-reset" title="Reset zoom">⊙</button><button id="rv-zoom-in" title="Zoom in">+</button></span></div>

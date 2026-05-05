@@ -27,6 +27,15 @@ METADATA_CSV_COLUMNS = [
     "category",
     "is_job_application",
     "military_service_argument",
+    "construction_works",
+    "petitioner_name",
+    "petitioner_gender",
+    "petitioner_occupation",
+    "petitioner_residence",
+    "petitioner_birthplace",
+    "petitioner_age",
+    "petitioner_writing_for",
+    "petition_type",
 ]
 
 
@@ -255,6 +264,15 @@ def _write_metadata_csv(
             meta.category,
             str(meta.is_job_application).lower(),
             str(meta.military_service_argument).lower(),
+            str(meta.construction_works).lower(),
+            meta.petitioner_name,
+            meta.petitioner_gender,
+            meta.petitioner_occupation,
+            meta.petitioner_residence,
+            meta.petitioner_birthplace,
+            meta.petitioner_age,
+            meta.petitioner_writing_for,
+            meta.petition_type,
         ])
 
 
@@ -263,7 +281,7 @@ def parse_transcribed_pages(txt_path: Path) -> list[tuple[str, str]]:
     Parse a transcribed .txt file (format "--- page.name ---\\ntext") into
     (page_name, transcript) pairs. Returns list of (page_name, text).
     """
-    text = txt_path.read_text(encoding="utf-8")
+    text = txt_path.read_text(encoding="utf-8", errors="replace")
     # Split by page delimiter; each segment is "page.name ---\ntranscript"
     segments = re.split(r"\n---\s+", text)
     result = []
@@ -373,13 +391,16 @@ def combine_metadata_csvs(output_dir: Path) -> list[Path]:
         rows = []
         header = None
         for f in csv_files:
-            with open(f, newline="", encoding="utf-8") as fp:
+            with open(f, newline="", encoding="utf-8", errors="replace") as fp:
                 r = csv.reader(fp)
                 row_header = next(r, None)
-                if row_header and header is None:
+                if not row_header:
+                    continue
+                if header is None:
                     header = row_header
+                n_cols = len(row_header)
                 for row in r:
-                    if row and len(row) == len(METADATA_CSV_COLUMNS):
+                    if row and len(row) == n_cols:
                         rows.append(row)
         with open(combined_path, "w", newline="", encoding="utf-8") as f:
             w = csv.writer(f)

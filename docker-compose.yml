@@ -17,11 +17,8 @@ services:
     volumes:
       - ./data/input:/data/input
       - ./data/output:/data/output
-      - chroma_store:/data/chroma
+      - ./data/chroma:/data/chroma
       # Dev: mount source so code changes apply without rebuild (restart container to reload)
       - ./src:/app/src
     # Override CMD at runtime, e.g:
     # docker compose run archival-htr search "battle of hastings"
-
-volumes:
-  chroma_store:

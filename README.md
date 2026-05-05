@@ -74,8 +74,11 @@ data/input/
 **Output** (under `data/output/` or `--output`):
 
 - `imported/{doc_name}/` — copied `txt/` and `page/` from the collection
-- `transcribed/` — one concatenated .txt per document plus per-page files: `transcribed/{doc_name}/{page_stem}.txt` (one per image); optional `transcribed/{doc_name}/page/` with PAGE XML
-- `metadata/` — one single-line CSV per analysed (image, transcript) pair; `metadata/combined.csv` is the merged table (language, category, date, etc.). Categories (Dutch): Petitie, Sollicitatie, Appostille/addendum, Rapport, Bijlage, Attest, Andere. To add a single image: use `ingest.annotate_and_write_metadata(image_path, transcript, output_dir, doc_name, page_id)`, then run `combine-metadata`.
+- `transcribed/` — one concatenated .txt per document plus per-page files:
+-- `transcribed/{doc_name}/{page_stem}.txt` (one per image); optional
+-- `transcribed/{doc_name}/page/` with PAGE XML
+- `metadata/` — one single-line CSV per analysed (image, transcript) pair; 
+-- `metadata/combined.csv` is the merged table (language, category, date, etc.). Categories (Dutch): Petitie, Sollicitatie, Appostille/addendum, Rapport, Bijlage, Attest, Andere. To add a single image: use `ingest.annotate_and_write_metadata(image_path, transcript, output_dir, doc_name, page_id)`, then run `combine-metadata`.
 
 ## Docker + Ollama (Connection refused)
 

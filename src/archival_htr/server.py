@@ -93,6 +93,10 @@ class FinalizedRequest(BaseModel):
     text: str
 
 
+class SampleResponse(BaseModel):
+    samples: dict[str, list[str]]
+
+
 class PageMetadataResponse(BaseModel):
     language: Optional[str] = None
     category: Optional[str] = None
@@ -101,6 +105,9 @@ class PageMetadataResponse(BaseModel):
     related_to_others: Optional[str] = None
     is_job_application: Optional[bool] = None
     military_service_argument: Optional[bool] = None
+    construction_works: Optional[bool] = None
+    petitioner_gender: Optional[str] = None
+    petition_type: Optional[str] = None
 
 
 class OverviewPage(BaseModel):
@@ -114,6 +121,9 @@ class OverviewPage(BaseModel):
     category: Optional[str] = None
     is_job_application: Optional[bool] = None
     military_service_argument: Optional[bool] = None
+    construction_works: Optional[bool] = None
+    petitioner_gender: Optional[str] = None
+    petition_type: Optional[str] = None
 
 
 class OverviewStats(BaseModel):
@@ -131,7 +141,7 @@ class OverviewResponse(BaseModel):
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
-_SAFE_ID_RE = re.compile(r"^[\w\-\.]+$")
+_SAFE_ID_RE = re.compile(r"^[\w\-\. ]+$")
 _REVIEW_EXTENSIONS = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".webp", ".bmp"}
 
 
@@ -177,6 +187,9 @@ def _parse_overview_row(row: dict, collection: str) -> Optional[OverviewPage]:
         category=_clean(row.get("category")),
         is_job_application=_parse_bool(row.get("is_job_application")),
         military_service_argument=_parse_bool(row.get("military_service_argument")),
+        construction_works=_parse_bool(row.get("construction_works")),
+        petitioner_gender=_clean(row.get("petitioner_gender")),
+        petition_type=_clean(row.get("petition_type")),
     )
 
 
@@ -224,6 +237,12 @@ def _load_transcript(source: str) -> tuple[str, int]:
 @app.get("/api/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/api/sample", response_model=SampleResponse)
+def api_sample():
+    """Return sampled document IDs grouped by collection (from SAMPLE_DOCS env var)."""
+    return SampleResponse(samples=config.sample_docs_by_collection())
 
 
 @app.get("/api/collections")
@@ -275,9 +294,6 @@ def api_search(req: SearchRequest):
             military_service=req.military_service,
         )
     except Exception as e:
-        msg = str(e).lower()
-        if any(k in msg for k in ("no documents", "collection", "index", "not enough")):
-            return SearchResponse(results=[], count=0)
         raise HTTPException(status_code=500, detail=str(e))
     return SearchResponse(
         results=[SearchResult(source=r["source"], score=round(r["score"], 4), text=r["text"]) for r in results],
@@ -515,6 +531,102 @@ def review_metadata(collection: str, document: str, page: str):
         related_to_others=_clean(row.get("related_to_others")),
         is_job_application=_parse_bool(row.get("is_job_application")),
         military_service_argument=_parse_bool(row.get("military_service_argument")),
+        construction_works=_parse_bool(row.get("construction_works")),
+        petitioner_gender=_clean(row.get("petitioner_gender")),
+        petition_type=_clean(row.get("petition_type")),
+    )
+
+
+@app.put("/api/review/{collection}/{document}/{page}/metadata", response_model=PageMetadataResponse)
+def review_update_metadata(collection: str, document: str, page: str, req: PageMetadataResponse):
+    """Overwrite per-page metadata CSV and rebuild combined.csv."""
+    _safe_id(collection)
+    _safe_id(document)
+    _safe_id(page)
+    from archival_htr.ingest import METADATA_CSV_COLUMNS, combine_metadata_csvs
+    from archival_htr.llm_client import DocumentMetadata, normalize_metadata
+
+    # Normalise incoming values before writing
+    meta = normalize_metadata(DocumentMetadata(
+        language=req.language or "unknown",
+        single_page_or_part=req.single_page_or_part or "unknown",
+        related_to_others=req.related_to_others or "unknown",
+        date_submission_writing=req.date_submission_writing or "unknown",
+        category=req.category or "Other",
+        is_job_application=req.is_job_application if req.is_job_application is not None else False,
+        military_service_argument=req.military_service_argument if req.military_service_argument is not None else False,
+        construction_works=req.construction_works if req.construction_works is not None else False,
+        petitioner_gender=req.petitioner_gender or "unknown",
+        petition_type=req.petition_type or "other",
+    ))
+
+    csv_path = Path(config.DATA_OUTPUT_DIR) / "metadata" / collection / f"{document}_{page}.csv"
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
+
+    def _bool_str(v: bool) -> str:
+        return str(v).lower()
+
+    with csv_path.open("w", encoding="utf-8", newline="") as fh:
+        writer = csv.writer(fh)
+        writer.writerow(METADATA_CSV_COLUMNS)
+        writer.writerow([
+            document,
+            page,
+            meta.language,
+            meta.single_page_or_part,
+            meta.related_to_others,
+            meta.date_submission_writing,
+            meta.category,
+            _bool_str(meta.is_job_application),
+            _bool_str(meta.military_service_argument),
+            _bool_str(meta.construction_works),
+            "",   # petitioner_name — not in review edit form
+            meta.petitioner_gender,
+            "", "", "", "", "",  # occupation, residence, birthplace, age, writing_for
+            meta.petition_type,
+        ])
+
+    try:
+        combine_metadata_csvs(Path(config.DATA_OUTPUT_DIR))
+    except Exception:
+        pass
+
+    # Best-effort ChromaDB update
+    try:
+        from archival_htr import rag, config as cfg
+        source_id = f"{collection}/{document}"
+        _chroma_client = rag._get_client()
+        chroma_col = rag._get_collection(_chroma_client)
+        result = chroma_col.get(where={"source": source_id})
+        if result["ids"]:
+            chroma_col.update(
+                ids=result["ids"],
+                metadatas=[{
+                    **m,
+                    "is_job_application": meta.is_job_application,
+                    "military_service_argument": meta.military_service_argument,
+                    "construction_works": meta.construction_works,
+                    "petitioner_gender": meta.petitioner_gender,
+                    "petition_type": meta.petition_type,
+                } for m in result["metadatas"]],
+            )
+    except Exception:
+        pass
+
+    def _none_if_unknown(v: str) -> Optional[str]:
+        return None if v in ("unknown", "") else v
+
+    return PageMetadataResponse(
+        language=_none_if_unknown(meta.language),
+        category=meta.category,
+        date_submission_writing=_none_if_unknown(meta.date_submission_writing),
+        single_page_or_part=meta.single_page_or_part,
+        related_to_others=meta.related_to_others,
+        is_job_application=meta.is_job_application,
+        military_service_argument=meta.military_service_argument,
+        construction_works=meta.construction_works,
+        petitioner_gender=_none_if_unknown(meta.petitioner_gender),
+        petition_type=meta.petition_type,
     )
 
 
@@ -524,6 +636,9 @@ def api_overview(
     category: Optional[str] = None,
     is_job_application: Optional[bool] = None,
     military_service_argument: Optional[bool] = None,
+    construction_works: Optional[bool] = None,
+    petitioner_gender: Optional[str] = None,
+    petition_type: Optional[str] = None,
 ):
     """Return all page metadata for the overview heatmap, with optional filtering."""
     metadata_root = Path(config.DATA_OUTPUT_DIR) / "metadata"
@@ -550,6 +665,12 @@ def api_overview(
                         if is_job_application is not None and page.is_job_application != is_job_application:
                             continue
                         if military_service_argument is not None and page.military_service_argument != military_service_argument:
+                            continue
+                        if construction_works is not None and page.construction_works != construction_works:
+                            continue
+                        if petitioner_gender and (page.petitioner_gender or "").lower() != petitioner_gender.lower():
+                            continue
+                        if petition_type and (page.petition_type or "").lower() != petition_type.lower():
                             continue
                         pages.append(page)
 

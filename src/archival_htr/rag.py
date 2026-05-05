@@ -73,7 +73,7 @@ def _build_index_text(output_dir: Path, collection: str, document: str) -> str:
     for page_name, transcribed_text in pages:
         page_stem = _Path(page_name).stem
         finalized_path = finalized_dir / f"{page_stem}.txt"
-        text = finalized_path.read_text(encoding="utf-8") if finalized_path.exists() else transcribed_text
+        text = finalized_path.read_text(encoding="utf-8", errors="replace") if finalized_path.exists() else transcribed_text
         parts.append(f"--- {page_name} ---\n{text}")
     return "\n\n".join(parts)
 
@@ -129,7 +129,8 @@ def index_all(output_dir: Path = None, overwrite: bool = False):
         for col_dir in sorted(transcribed_dir.iterdir()):
             if col_dir.is_dir():
                 for txt in sorted(col_dir.glob("*.txt")):
-                    pairs.append((col_dir.name, txt.stem))
+                    if not txt.name.startswith("."):
+                        pairs.append((col_dir.name, txt.stem))
     console.print(f"Found [bold]{len(pairs)}[/bold] transcription(s) to index\n")
     for col, doc in pairs:
         index_document(col, doc, output_dir, overwrite=overwrite)
@@ -156,7 +157,10 @@ def search(
 
     clauses = []
     if source is not None:
-        clauses.append({"source": source})
+        if "/" in source:
+            clauses.append({"source": source})
+        else:
+            clauses.append({"collection": source})
     if job_application is not None:
         clauses.append({"is_job_application": job_application})
     if military_service is not None:

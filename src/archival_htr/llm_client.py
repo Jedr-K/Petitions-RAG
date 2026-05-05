@@ -19,16 +19,20 @@ from pathlib import Path
 
 from archival_htr import config
 
-# Metadata categories (Dutch) for document classification
-METADATA_CATEGORIES = [
-    "Petitie",
-    "Sollicitatie",
-    "Appostille/addendum",
-    "Rapport",
-    "Bijlage",
-    "Attest",
-    "Andere",
+# Controlled vocabulary constants for metadata normalisation
+METADATA_CATEGORIES = ["petition", "apostille", "attachement", "Other"]
+
+PETITION_TYPES = [
+    "Request for financial aid",
+    "Request for permission",
+    "Request for certification",
+    "Job application",
+    "Complaint",
+    "other",
 ]
+
+SCOPE_VALUES  = ["single document", "part of dossier"]
+GENDER_VALUES = ["Male", "Female", "unknown"]
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -277,23 +281,88 @@ class DocumentMetadata:
     category: str             # one of METADATA_CATEGORIES
     is_job_application: bool = False          # petition explicitly requesting a position/office
     military_service_argument: bool = False   # prior military service cited as a qualification
+    construction_works: bool = False          # document relates to construction or building works
+    petitioner_name: str = "unknown"
+    petitioner_gender: str = "unknown"
+    petitioner_occupation: str = "unknown"
+    petitioner_residence: str = "unknown"
+    petitioner_birthplace: str = "unknown"
+    petitioner_age: str = "unknown"
+    petitioner_writing_for: str = "unknown"
+    petition_type: str = "other"
+
+
+def normalize_metadata(meta: "DocumentMetadata") -> "DocumentMetadata":
+    """Clamp all controlled-vocabulary fields to their allowed sets."""
+    # scope
+    raw = (meta.single_page_or_part or "").lower()
+    if "dossier" in raw or "part" in raw:
+        meta.single_page_or_part = "part of dossier"
+    else:
+        meta.single_page_or_part = "single document"
+
+    # relation (depends on normalised scope)
+    if meta.single_page_or_part == "single document":
+        meta.related_to_others = "standalone"
+    else:
+        rel = (meta.related_to_others or "").strip()
+        if not rel.lower().startswith("attached to"):
+            meta.related_to_others = "attached to " + rel if rel else "attached to "
+
+    # category — map Dutch originals and variants to English targets
+    _CAT_MAP = {
+        "petitie": "petition",         "petition": "petition",
+        "appostille/addendum": "apostille", "appostille": "apostille",
+        "addendum": "apostille",       "apostille": "apostille",
+        "rapport": "attachement",      "bijlage": "attachement",
+        "attachement": "attachement",  "attachment": "attachement",
+        "sollicitatie": "Other",       "attest": "Other",
+        "andere": "Other",             "other": "Other",
+    }
+    meta.category = _CAT_MAP.get((meta.category or "").strip().lower(), "Other")
+
+    # gender (1800s — infer from name/marital status only)
+    g = (meta.petitioner_gender or "").strip().lower()
+    if g in ("man", "male", "m"):
+        meta.petitioner_gender = "Male"
+    elif g in ("vrouw", "female", "f", "v", "woman"):
+        meta.petitioner_gender = "Female"
+    else:
+        meta.petitioner_gender = "unknown"
+
+    # petition_type
+    _PT = {v.lower(): v for v in PETITION_TYPES}
+    meta.petition_type = _PT.get((meta.petition_type or "").strip().lower(), "other")
+
+    return meta
 
 
 def _metadata_prompt(transcript: str) -> str:
-    categories_str = ", ".join(METADATA_CATEGORIES)
-    return f"""You are an expert archivist analyzing a historical document. You are given:
+    petition_types_str = ", ".join(f'"{v}"' for v in PETITION_TYPES)
+    return f"""You are an expert archivist analyzing a 19th-century historical document. You are given:
 1. An image of the document (manuscript/printed page).
 2. A refined transcription (HTR) of the text on that page.
 
 From the image and transcript, infer the following and respond with a single JSON object only (no markdown, no explanation):
 
 - "language": Primary language of the source (e.g. Dutch, French, Latin). Use "unknown" if unclear.
-- "single_page_or_part": Either "single_page" if this appears to be a complete standalone document, or "part_of_larger" with a brief note (e.g. "part_of_larger (continuation of petition)"). You can infer this from the content of the transcript.
-- "related_to_others": Brief note on how this document might relate to others in the same corpus (e.g. cover letter for a petition, attachment to a report). Use "unknown" if no clear relation.
+- "single_page_or_part": Exactly one of: "single document" (complete standalone document) or "part of dossier" (continuation, cover letter, attachment, or similar).
+- "related_to_others": If "single document", write "standalone". If "part of dossier", write "attached to <brief description>", e.g. "attached to petition of Jan de Vries".
 - "date_submission_writing": Inferred date of submission or writing (year or range, e.g. "1789", "ca. 1790-1795"). Use "unknown" if not inferrable.
-- "category": Exactly one of: {categories_str}
+- "category": Exactly one of: petition, apostille, attachement, Other
+- "petition_type": Exactly one of: {petition_types_str}. Choose the option that best describes the nature of the request.
 - "is_job_application": true if this document is a petition or request explicitly seeking a specific position, office, job, or appointment. false otherwise.
 - "military_service_argument": true if prior military service — of the petitioner or a family member — is cited as a supporting argument or qualification for the request. false otherwise.
+- "construction_works": true if the document relates to construction, building works, repairs, infrastructure, or public works projects. This includes requests for reimbursement or subsidies for facade replacements. false otherwise.
+
+## About the petitioner/author
+- "petitioner_name": Full name of the petitioner as stated in the document. "unknown" if not mentioned.
+- "petitioner_gender": Exactly one of: "Male", "Female", "unknown". Base this only on the name and marital status as written in the document (e.g. "weduwe" → Female, "de heer" → Male).
+- "petitioner_occupation": Occupation or profession of the petitioner. "unknown" if not stated.
+- "petitioner_residence": Place of residence of the petitioner. "unknown" if not stated.
+- "petitioner_birthplace": Place of birth of the petitioner. "unknown" if not stated.
+- "petitioner_age": Age of the petitioner (number or range, e.g. "34", "ca. 40"). "unknown" if not stated.
+- "petitioner_writing_for": "own name" if writing in their own name; otherwise a brief description of who they represent (e.g. "widow of Jan de Vries", "on behalf of the community of X"). "unknown" if unclear.
 
 Transcription (for context):
 ---
@@ -305,11 +374,13 @@ Respond with only the JSON object."""
 
 def enhance_metadata_prompt(transcript: str) -> str:
     categories_str = ", ".join(METADATA_CATEGORIES)
-    return f""" using the provided .txt file containing the transcript and the .csv file containing the current metadata, 
-    enhance the csv string by reading the transcript and deducting if this 
-    1) is a complete text -> single or multiple page
+    petition_types_str = ", ".join(PETITION_TYPES)
+    return f"""Using the provided .txt file containing the transcript and the .csv file containing the current metadata,
+    enhance the csv string by reading the transcript and deducting if this
+    1) is a complete text: use exactly "single document" or "part of dossier"
     2) what type of document this is. Use one of the following categories: {categories_str}
-    3) the date of submission or writing
+    3) the petition type. Use one of: {petition_types_str}
+    4) the date of submission or writing
     Return the enhanced csv string."""
 
 
@@ -324,25 +395,32 @@ def _parse_metadata_response(raw: str) -> DocumentMetadata:
         data = json.loads(raw)
     except json.JSONDecodeError:
         # Return safe defaults rather than crashing when LLM returns non-JSON
-        return DocumentMetadata(
+        return normalize_metadata(DocumentMetadata(
             language="unknown",
             single_page_or_part="unknown",
             related_to_others="unknown",
             date_submission_writing="unknown",
-            category="Andere",
-        )
-    category = data.get("category", "Andere")
-    if category not in METADATA_CATEGORIES:
-        category = "Andere"
-    return DocumentMetadata(
+            category="Other",
+        ))
+    meta = DocumentMetadata(
         language=data.get("language", "unknown"),
         single_page_or_part=data.get("single_page_or_part", "unknown"),
         related_to_others=data.get("related_to_others", "unknown"),
         date_submission_writing=data.get("date_submission_writing", "unknown"),
-        category=category,
+        category=data.get("category", "Other"),
         is_job_application=bool(data.get("is_job_application", False)),
         military_service_argument=bool(data.get("military_service_argument", False)),
+        construction_works=bool(data.get("construction_works", False)),
+        petitioner_name=data.get("petitioner_name", "unknown"),
+        petitioner_gender=data.get("petitioner_gender", "unknown"),
+        petitioner_occupation=data.get("petitioner_occupation", "unknown"),
+        petitioner_residence=data.get("petitioner_residence", "unknown"),
+        petitioner_birthplace=data.get("petitioner_birthplace", "unknown"),
+        petitioner_age=data.get("petitioner_age", "unknown"),
+        petitioner_writing_for=data.get("petitioner_writing_for", "unknown"),
+        petition_type=data.get("petition_type", "other"),
     )
+    return normalize_metadata(meta)
 
 
 def _annotate_metadata_gemini(image_path: Path, transcript: str) -> DocumentMetadata:

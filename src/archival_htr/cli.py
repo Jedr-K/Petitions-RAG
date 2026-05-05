@@ -122,6 +122,46 @@ def combine_metadata(
 
 
 @app.command()
+def audit(
+    output_dir: Path = typer.Option(None, "--output", "-o", help="Folder containing transcribed/"),
+    collection: str | None = typer.Option(None, "--collection", "-c", help="Limit scan to one collection"),
+):
+    """List combined transcript files that contain pages with empty transcripts."""
+    from archival_htr import config
+    from archival_htr.ingest import parse_transcribed_pages
+
+    output_dir = output_dir or Path(config.DATA_OUTPUT_DIR)
+    transcribed_dir = output_dir / "transcribed"
+    if not transcribed_dir.exists():
+        typer.echo(f"No transcribed directory found at {transcribed_dir}")
+        raise typer.Exit(1)
+
+    found_any = False
+    glob_root = transcribed_dir / collection if collection else transcribed_dir
+
+    for txt_file in sorted(glob_root.rglob("*.txt")):
+        # Combined files live exactly 2 levels below transcribed_dir.
+        # Per-page files are 3 levels deep — skip them.
+        if txt_file.parent.parent != transcribed_dir:
+            continue
+
+        pages = parse_transcribed_pages(txt_file)
+        if not pages:
+            continue
+
+        empty = [name.split(" ---")[0].strip() for name, text in pages if not text.strip()]
+        if empty:
+            found_any = True
+            rel = txt_file.relative_to(transcribed_dir)
+            typer.echo(f"{rel}  ({len(empty)}/{len(pages)} empty pages)")
+            for name in empty:
+                typer.echo(f"  - {name}")
+
+    if not found_any:
+        typer.echo("No empty transcripts found.")
+
+
+@app.command()
 def search(
     query: str = typer.Argument(..., help="Search query"),
     n: int = typer.Option(5, "--results", "-n", help="Number of results to return"),

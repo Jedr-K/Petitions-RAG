@@ -8,4 +8,4 @@ services:
     volumes:
       - ./data/input:/data/input
       - ./data/output:/data/output
-      - chroma_store:/data/chroma
+      - ./data/chroma:/data/chroma

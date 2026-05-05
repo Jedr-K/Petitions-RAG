@@ -32,6 +32,18 @@ CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "50"))  # word overlap between ch
 
 COLLECTION_NAME = os.getenv("COLLECTION_NAME", "manuscripts")  # ChromaDB collection name
 
+SAMPLE_DOCS = os.getenv("SAMPLE_DOCS", "")  # comma-separated collection/document pairs for gewogen steekproef
+
+
+def sample_docs_by_collection() -> dict[str, list[str]]:
+    result: dict[str, list[str]] = {}
+    for entry in SAMPLE_DOCS.split(","):
+        entry = entry.strip()
+        if "/" in entry:
+            col, doc = entry.split("/", 1)
+            result.setdefault(col, []).append(doc)
+    return result
+
 HTR_PROMPT = os.getenv(
     "HTR_PROMPT",
     (
