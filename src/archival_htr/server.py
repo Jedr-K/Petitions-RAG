@@ -104,9 +104,17 @@ class PageMetadataResponse(BaseModel):
     single_page_or_part: Optional[str] = None
     related_to_others: Optional[str] = None
     is_job_application: Optional[bool] = None
+    job_application_type: Optional[str] = None
     military_service_argument: Optional[bool] = None
     construction_works: Optional[bool] = None
+    belgian_revolution_1830: Optional[bool] = None
+    petitioner_name: Optional[str] = None
     petitioner_gender: Optional[str] = None
+    petitioner_occupation: Optional[str] = None
+    petitioner_residence: Optional[str] = None
+    petitioner_birthplace: Optional[str] = None
+    petitioner_age: Optional[str] = None
+    petitioner_writing_for: Optional[str] = None
     petition_type: Optional[str] = None
 
 
@@ -120,9 +128,17 @@ class OverviewPage(BaseModel):
     date_submission_writing: Optional[str] = None
     category: Optional[str] = None
     is_job_application: Optional[bool] = None
+    job_application_type: Optional[str] = None
     military_service_argument: Optional[bool] = None
     construction_works: Optional[bool] = None
+    belgian_revolution_1830: Optional[bool] = None
+    petitioner_name: Optional[str] = None
     petitioner_gender: Optional[str] = None
+    petitioner_occupation: Optional[str] = None
+    petitioner_residence: Optional[str] = None
+    petitioner_birthplace: Optional[str] = None
+    petitioner_age: Optional[str] = None
+    petitioner_writing_for: Optional[str] = None
     petition_type: Optional[str] = None
 
 
@@ -186,9 +202,17 @@ def _parse_overview_row(row: dict, collection: str) -> Optional[OverviewPage]:
         date_submission_writing=_clean(row.get("date_submission_writing")),
         category=_clean(row.get("category")),
         is_job_application=_parse_bool(row.get("is_job_application")),
+        job_application_type=_clean(row.get("job_application_type")),
         military_service_argument=_parse_bool(row.get("military_service_argument")),
         construction_works=_parse_bool(row.get("construction_works")),
+        belgian_revolution_1830=_parse_bool(row.get("belgian_revolution_1830")),
+        petitioner_name=_clean(row.get("petitioner_name")),
         petitioner_gender=_clean(row.get("petitioner_gender")),
+        petitioner_occupation=_clean(row.get("petitioner_occupation")),
+        petitioner_residence=_clean(row.get("petitioner_residence")),
+        petitioner_birthplace=_clean(row.get("petitioner_birthplace")),
+        petitioner_age=_clean(row.get("petitioner_age")),
+        petitioner_writing_for=_clean(row.get("petitioner_writing_for")),
         petition_type=_clean(row.get("petition_type")),
     )
 
@@ -530,9 +554,17 @@ def review_metadata(collection: str, document: str, page: str):
         single_page_or_part=_clean(row.get("single_page_or_part")),
         related_to_others=_clean(row.get("related_to_others")),
         is_job_application=_parse_bool(row.get("is_job_application")),
+        job_application_type=_clean(row.get("job_application_type")),
         military_service_argument=_parse_bool(row.get("military_service_argument")),
         construction_works=_parse_bool(row.get("construction_works")),
+        belgian_revolution_1830=_parse_bool(row.get("belgian_revolution_1830")),
+        petitioner_name=_clean(row.get("petitioner_name")),
         petitioner_gender=_clean(row.get("petitioner_gender")),
+        petitioner_occupation=_clean(row.get("petitioner_occupation")),
+        petitioner_residence=_clean(row.get("petitioner_residence")),
+        petitioner_birthplace=_clean(row.get("petitioner_birthplace")),
+        petitioner_age=_clean(row.get("petitioner_age")),
+        petitioner_writing_for=_clean(row.get("petitioner_writing_for")),
         petition_type=_clean(row.get("petition_type")),
     )
 
@@ -554,9 +586,17 @@ def review_update_metadata(collection: str, document: str, page: str, req: PageM
         date_submission_writing=req.date_submission_writing or "unknown",
         category=req.category or "Other",
         is_job_application=req.is_job_application if req.is_job_application is not None else False,
+        job_application_type=req.job_application_type or "unknown",
         military_service_argument=req.military_service_argument if req.military_service_argument is not None else False,
         construction_works=req.construction_works if req.construction_works is not None else False,
+        belgian_revolution_1830=req.belgian_revolution_1830 if req.belgian_revolution_1830 is not None else False,
+        petitioner_name=req.petitioner_name or "unknown",
         petitioner_gender=req.petitioner_gender or "unknown",
+        petitioner_occupation=req.petitioner_occupation or "unknown",
+        petitioner_residence=req.petitioner_residence or "unknown",
+        petitioner_birthplace=req.petitioner_birthplace or "unknown",
+        petitioner_age=req.petitioner_age or "unknown",
+        petitioner_writing_for=req.petitioner_writing_for or "unknown",
         petition_type=req.petition_type or "other",
     ))
 
@@ -578,11 +618,17 @@ def review_update_metadata(collection: str, document: str, page: str, req: PageM
             meta.date_submission_writing,
             meta.category,
             _bool_str(meta.is_job_application),
+            meta.job_application_type,
             _bool_str(meta.military_service_argument),
             _bool_str(meta.construction_works),
-            "",   # petitioner_name — not in review edit form
+            _bool_str(meta.belgian_revolution_1830),
+            meta.petitioner_name,
             meta.petitioner_gender,
-            "", "", "", "", "",  # occupation, residence, birthplace, age, writing_for
+            meta.petitioner_occupation,
+            meta.petitioner_residence,
+            meta.petitioner_birthplace,
+            meta.petitioner_age,
+            meta.petitioner_writing_for,
             meta.petition_type,
         ])
 
@@ -604,9 +650,17 @@ def review_update_metadata(collection: str, document: str, page: str, req: PageM
                 metadatas=[{
                     **m,
                     "is_job_application": meta.is_job_application,
+                    "job_application_type": meta.job_application_type,
                     "military_service_argument": meta.military_service_argument,
                     "construction_works": meta.construction_works,
+                    "belgian_revolution_1830": meta.belgian_revolution_1830,
+                    "petitioner_name": meta.petitioner_name,
                     "petitioner_gender": meta.petitioner_gender,
+                    "petitioner_occupation": meta.petitioner_occupation,
+                    "petitioner_residence": meta.petitioner_residence,
+                    "petitioner_birthplace": meta.petitioner_birthplace,
+                    "petitioner_age": meta.petitioner_age,
+                    "petitioner_writing_for": meta.petitioner_writing_for,
                     "petition_type": meta.petition_type,
                 } for m in result["metadatas"]],
             )
@@ -623,9 +677,17 @@ def review_update_metadata(collection: str, document: str, page: str, req: PageM
         single_page_or_part=meta.single_page_or_part,
         related_to_others=meta.related_to_others,
         is_job_application=meta.is_job_application,
+        job_application_type=_none_if_unknown(meta.job_application_type),
         military_service_argument=meta.military_service_argument,
         construction_works=meta.construction_works,
+        belgian_revolution_1830=meta.belgian_revolution_1830,
+        petitioner_name=_none_if_unknown(meta.petitioner_name),
         petitioner_gender=_none_if_unknown(meta.petitioner_gender),
+        petitioner_occupation=_none_if_unknown(meta.petitioner_occupation),
+        petitioner_residence=_none_if_unknown(meta.petitioner_residence),
+        petitioner_birthplace=_none_if_unknown(meta.petitioner_birthplace),
+        petitioner_age=_none_if_unknown(meta.petitioner_age),
+        petitioner_writing_for=_none_if_unknown(meta.petitioner_writing_for),
         petition_type=meta.petition_type,
     )
 
@@ -634,15 +696,27 @@ def review_update_metadata(collection: str, document: str, page: str, req: PageM
 def api_overview(
     language: Optional[str] = None,
     category: Optional[str] = None,
+    single_page_or_part: Optional[str] = None,
     is_job_application: Optional[bool] = None,
+    job_application_type: Optional[str] = None,
     military_service_argument: Optional[bool] = None,
     construction_works: Optional[bool] = None,
+    belgian_revolution_1830: Optional[bool] = None,
+    petitioner_name: Optional[str] = None,
     petitioner_gender: Optional[str] = None,
+    petitioner_occupation: Optional[str] = None,
+    petitioner_residence: Optional[str] = None,
+    petitioner_birthplace: Optional[str] = None,
+    petitioner_age: Optional[str] = None,
+    petitioner_writing_for: Optional[str] = None,
     petition_type: Optional[str] = None,
 ):
     """Return all page metadata for the overview heatmap, with optional filtering."""
     metadata_root = Path(config.DATA_OUTPUT_DIR) / "metadata"
     pages: list[OverviewPage] = []
+
+    def _contains(field: str | None, q: str) -> bool:
+        return q.lower() in (field or "").lower()
 
     if metadata_root.is_dir():
         for col_dir in sorted(metadata_root.iterdir()):
@@ -662,13 +736,31 @@ def api_overview(
                             continue
                         if category and (page.category or "").lower() != category.lower():
                             continue
+                        if single_page_or_part and (page.single_page_or_part or "").lower() != single_page_or_part.lower():
+                            continue
                         if is_job_application is not None and page.is_job_application != is_job_application:
+                            continue
+                        if job_application_type and not _contains(page.job_application_type, job_application_type):
                             continue
                         if military_service_argument is not None and page.military_service_argument != military_service_argument:
                             continue
                         if construction_works is not None and page.construction_works != construction_works:
                             continue
+                        if belgian_revolution_1830 is not None and page.belgian_revolution_1830 != belgian_revolution_1830:
+                            continue
+                        if petitioner_name and not _contains(page.petitioner_name, petitioner_name):
+                            continue
                         if petitioner_gender and (page.petitioner_gender or "").lower() != petitioner_gender.lower():
+                            continue
+                        if petitioner_occupation and not _contains(page.petitioner_occupation, petitioner_occupation):
+                            continue
+                        if petitioner_residence and not _contains(page.petitioner_residence, petitioner_residence):
+                            continue
+                        if petitioner_birthplace and not _contains(page.petitioner_birthplace, petitioner_birthplace):
+                            continue
+                        if petitioner_age and not _contains(page.petitioner_age, petitioner_age):
+                            continue
+                        if petitioner_writing_for and not _contains(page.petitioner_writing_for, petitioner_writing_for):
                             continue
                         if petition_type and (page.petition_type or "").lower() != petition_type.lower():
                             continue
