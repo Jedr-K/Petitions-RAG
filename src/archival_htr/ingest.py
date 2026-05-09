@@ -26,8 +26,31 @@ METADATA_CSV_COLUMNS = [
     "date_submission_writing",
     "category",
     "is_job_application",
+    "job_application_type",
     "military_service_argument",
     "construction_works",
+    "belgian_revolution_1830",
+    "petitioner_name",
+    "petitioner_gender",
+    "petitioner_occupation",
+    "petitioner_residence",
+    "petitioner_birthplace",
+    "petitioner_age",
+    "petitioner_writing_for",
+    "petition_type",
+]
+
+# Fields that are document-level (same for every page) and safe to propagate.
+# source_doc, source_page, single_page_or_part, related_to_others are intentionally excluded.
+PROPAGATABLE_FIELDS = [
+    "language",
+    "date_submission_writing",
+    "category",
+    "is_job_application",
+    "job_application_type",
+    "military_service_argument",
+    "construction_works",
+    "belgian_revolution_1830",
     "petitioner_name",
     "petitioner_gender",
     "petitioner_occupation",
@@ -263,8 +286,10 @@ def _write_metadata_csv(
             meta.date_submission_writing,
             meta.category,
             str(meta.is_job_application).lower(),
+            meta.job_application_type,
             str(meta.military_service_argument).lower(),
             str(meta.construction_works).lower(),
+            str(meta.belgian_revolution_1830).lower(),
             meta.petitioner_name,
             meta.petitioner_gender,
             meta.petitioner_occupation,
@@ -308,6 +333,7 @@ def annotate_and_write_metadata(
     doc_name: str,
     page_id: str,
     overwrite: bool = False,
+    hints: dict | None = None,
 ) -> Path:
     """
     Run LLM metadata annotation for one (image, transcript) pair and write
@@ -320,7 +346,7 @@ def annotate_and_write_metadata(
     if csv_path.exists() and not overwrite:
         console.print(f"[dim]Metadata exists[/dim] {csv_path.name}, skipping.")
         return csv_path
-    meta = annotate_metadata(image_path, transcript)
+    meta = annotate_metadata(image_path, transcript, hints=hints)
     _write_metadata_csv(meta, csv_path, source_doc=doc_name, source_page=page_id)
     console.print(f"[green]Metadata[/green] → {csv_path}")
     return csv_path
@@ -331,6 +357,7 @@ def run_metadata_for_document(
     output_dir: Path,
     overwrite: bool = False,
     page_stems: set[str] | None = None,
+    hints: dict | None = None,
 ) -> list[Path]:
     """
     For each page in the document: load transcript from output_dir/transcribed/{collection}/{doc_name}.txt,
@@ -360,7 +387,8 @@ def run_metadata_for_document(
             continue
         try:
             path = annotate_and_write_metadata(
-                page_path, transcript, output_dir, collection, doc_name, page_path.stem, overwrite=overwrite
+                page_path, transcript, output_dir, collection, doc_name, page_path.stem,
+                overwrite=overwrite, hints=hints,
             )
             written.append(path)
         except Exception as e:
@@ -411,6 +439,98 @@ def combine_metadata_csvs(output_dir: Path) -> list[Path]:
     return combined_paths
 
 
+def propagate_metadata_within_document(
+    collection: str,
+    doc_name: str,
+    output_dir: Path,
+    fields: list[str] | None = None,
+    source_page: str | None = None,
+    overwrite_existing: bool = False,
+) -> int:
+    """Copy metadata fields from one page to all other pages of the same document.
+
+    Args:
+        collection: Collection name (subdirectory under metadata/).
+        doc_name: Document name (prefix of per-page CSV files).
+        output_dir: Root output directory containing metadata/.
+        fields: Which fields to propagate. Defaults to PROPAGATABLE_FIELDS.
+        source_page: Page stem to copy from. Defaults to the first page (alphabetically).
+        overwrite_existing: If False (default), only fill fields that are blank in target pages.
+    Returns:
+        Number of page CSVs updated.
+    """
+    fields = fields or PROPAGATABLE_FIELDS
+    invalid = [f for f in fields if f not in PROPAGATABLE_FIELDS]
+    if invalid:
+        raise ValueError(f"Non-propagatable field(s): {invalid}. Allowed: {PROPAGATABLE_FIELDS}")
+
+    metadata_dir = output_dir / METADATA_SUBDIR / collection
+    safe_doc = re.sub(r"[^\w\-.]", "_", doc_name)
+
+    # Collect all per-page CSVs for this document (exclude combined.csv)
+    page_csvs = sorted(
+        f for f in metadata_dir.glob(f"{safe_doc}_*.csv")
+        if f.name != METADATA_COMBINED_FILENAME
+    )
+    if not page_csvs:
+        console.print(f"[yellow]No per-page CSVs found[/yellow] for {collection}/{doc_name}")
+        return 0
+
+    # Determine source CSV
+    if source_page:
+        safe_page = re.sub(r"[^\w\-.]", "_", source_page)
+        src_path = metadata_dir / f"{safe_doc}_{safe_page}.csv"
+        if not src_path.exists():
+            raise FileNotFoundError(f"Source page CSV not found: {src_path}")
+    else:
+        src_path = page_csvs[0]
+
+    # Read source row
+    with open(src_path, newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        src_rows = list(reader)
+    if not src_rows:
+        console.print(f"[yellow]Source CSV is empty:[/yellow] {src_path.name}")
+        return 0
+    src_row = src_rows[0]
+    values = {field: src_row.get(field, "") for field in fields}
+
+    console.print(f"[cyan]Propagating from[/cyan] {src_path.name}:")
+    for field, val in values.items():
+        console.print(f"  [dim]{field}[/dim] = {val!r}")
+
+    updated = 0
+    for csv_path in page_csvs:
+        if csv_path == src_path:
+            continue
+        with open(csv_path, newline="", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+            header = reader.fieldnames or METADATA_CSV_COLUMNS
+        if not rows:
+            continue
+        row = rows[0]
+        changed = False
+        for field, val in values.items():
+            if field not in row:
+                continue
+            if overwrite_existing or not row[field].strip():
+                if row[field] != val:
+                    row[field] = val
+                    changed = True
+        if not changed:
+            console.print(f"  [dim]No changes needed[/dim] → {csv_path.name}")
+            continue
+        with open(csv_path, "w", newline="", encoding="utf-8") as f:
+            w = csv.DictWriter(f, fieldnames=header, extrasaction="ignore")
+            w.writeheader()
+            w.writerow(row)
+        console.print(f"  [green]Updated[/green] → {csv_path.name}")
+        updated += 1
+
+    return updated
+
+
 def ingest_all(
     input_dir: Path = None,
     output_dir: Path = None,
@@ -419,6 +539,7 @@ def ingest_all(
     page_stems: list[str] | None = None,
     run_metadata: bool = True,
     skip_transcription: bool = False,
+    hints: dict | None = None,
 ) -> list[Path]:
     input_dir = input_dir or Path(config.DATA_INPUT_DIR)
     output_dir = output_dir or Path(config.DATA_OUTPUT_DIR)
@@ -450,7 +571,7 @@ def ingest_all(
 
     if run_metadata:
         for folder in doc_folders:
-            run_metadata_for_document(folder, output_dir, overwrite=overwrite, page_stems=page_set)
+            run_metadata_for_document(folder, output_dir, overwrite=overwrite, page_stems=page_set, hints=hints)
         combine_metadata_csvs(output_dir)
 
     return results

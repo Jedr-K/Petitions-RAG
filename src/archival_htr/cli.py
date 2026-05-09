@@ -1,3 +1,4 @@
+import json
 import typer
 from pathlib import Path
 from rich.console import Console
@@ -12,6 +13,13 @@ app = typer.Typer(
 console = Console()
 
 
+def _load_hints(hints_path: Path | None) -> dict | None:
+    if hints_path is None:
+        return None
+    with open(hints_path, encoding="utf-8") as f:
+        return json.load(f)
+
+
 @app.command()
 def transcribe(
     input_dir: Path = typer.Option(None, "--input", "-i", help="Folder of document subfolders"),
@@ -22,6 +30,7 @@ def transcribe(
     no_metadata: bool = typer.Option(False, "--no-metadata", help="Skip metadata annotation and combine step"),
     imported_only: bool = typer.Option(False, "--imported-only", help="Skip LLM transcription; use existing imported transcripts only"),
     backend: str = typer.Option(None, "--backend", help="Override backend: 'ollama' or 'gemini' (default: from env BACKEND)"),
+    hints: Path = typer.Option(None, "--hints", help="Path to a JSON hints file with field-specific examples for metadata annotation"),
 ):
     """Transcribe manuscript images to .txt. Use --doc to limit to specific documents, --page for specific pages."""
     import os
@@ -36,6 +45,7 @@ def transcribe(
         page_stems=page or None,
         run_metadata=not no_metadata,
         skip_transcription=imported_only,
+        hints=_load_hints(hints),
     )
 
 
@@ -59,6 +69,7 @@ def ingest(
     no_metadata: bool = typer.Option(False, "--no-metadata", help="Skip metadata annotation and combine step"),
     imported_only: bool = typer.Option(False, "--imported-only", help="Skip LLM transcription; use existing imported transcripts only"),
     backend: str = typer.Option(None, "--backend", help="Override backend: 'ollama' or 'gemini' (default: from env BACKEND)"),
+    hints: Path = typer.Option(None, "--hints", help="Path to a JSON hints file with field-specific examples for metadata annotation"),
 ):
     """Run transcribe + metadata + index in one step. Use --doc/--page to limit scope."""
     import os
@@ -74,6 +85,7 @@ def ingest(
         page_stems=page or None,
         run_metadata=not no_metadata,
         skip_transcription=imported_only,
+        hints=_load_hints(hints),
     )
     if paths:
         # paths[0] = output/transcribed/{collection}/{document}.txt → .parent×3 = output/
@@ -87,6 +99,7 @@ def metadata(
     overwrite: bool = typer.Option(False, "--overwrite", help="Re-annotate and overwrite existing metadata CSVs"),
     doc: list[str] = typer.Option([], "--doc", "-d", help="Process only these document names; omit for all"),
     page: list[str] = typer.Option([], "--page", "-p", help="Process only these page stems; omit for all"),
+    hints: Path = typer.Option(None, "--hints", help="Path to a JSON hints file with field-specific examples for metadata annotation"),
 ):
     """Run metadata annotation for all transcribed docs, then combine into one CSV."""
     from archival_htr import config
@@ -104,8 +117,9 @@ def metadata(
             or f.parent.name in doc_set
         ]
     page_set = set(page) if page else None
+    loaded_hints = _load_hints(hints)
     for folder in doc_folders:
-        run_metadata_for_document(folder, output_dir, overwrite=overwrite, page_stems=page_set)
+        run_metadata_for_document(folder, output_dir, overwrite=overwrite, page_stems=page_set, hints=loaded_hints)
     combine_metadata_csvs(output_dir)
 
 
@@ -400,6 +414,56 @@ def query(
     console.print("[bold]Question:[/bold]", question, "\n")
     answer = query_with_context(context, question)
     console.print("[bold]Answer:[/bold]\n", answer)
+
+
+@app.command()
+def fill_metadata(
+    output_dir: Path = typer.Option(None, "--output", "-o", help="Folder containing metadata/"),
+    collection: str = typer.Option(..., "--collection", "-c", help="Collection name (e.g. 14)"),
+    doc: str = typer.Option(..., "--doc", "-d", help="Document name to fill (e.g. petition_001)"),
+    from_page: str | None = typer.Option(None, "--from-page", help="Page stem to copy from (default: first page)"),
+    fields: list[str] = typer.Option([], "--field", "-f", help="Field(s) to propagate; omit for all propagatable fields"),
+    overwrite: bool = typer.Option(False, "--overwrite", help="Overwrite non-blank fields in target pages"),
+):
+    """Propagate metadata from one page to all other pages of the same document.
+
+    By default only fills blank fields. Use --overwrite to replace existing values too.
+    Use --field (repeatable) to limit which fields are propagated.
+
+    Example (fill language + date from first page, leave other fields alone):
+
+      archival-htr fill-metadata -c 14 -d petition_001 --field language --field date_submission_writing
+    """
+    from archival_htr import config as cfg
+    from archival_htr.ingest import propagate_metadata_within_document, combine_metadata_csvs, PROPAGATABLE_FIELDS
+
+    out = output_dir or Path(cfg.DATA_OUTPUT_DIR)
+
+    if fields:
+        invalid = [f for f in fields if f not in PROPAGATABLE_FIELDS]
+        if invalid:
+            console.print(f"[red]Unknown/non-propagatable field(s):[/red] {invalid}")
+            console.print(f"[dim]Allowed:[/dim] {', '.join(PROPAGATABLE_FIELDS)}")
+            raise typer.Exit(1)
+
+    try:
+        n = propagate_metadata_within_document(
+            collection=collection,
+            doc_name=doc,
+            output_dir=out,
+            fields=list(fields) if fields else None,
+            source_page=from_page,
+            overwrite_existing=overwrite,
+        )
+    except FileNotFoundError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1)
+
+    if n:
+        console.print(f"\n[green]Updated {n} page(s).[/green] Rebuilding combined.csv...")
+        combine_metadata_csvs(out)
+    else:
+        console.print("[yellow]No pages were updated.[/yellow]")
 
 
 @app.command()

@@ -280,8 +280,10 @@ class DocumentMetadata:
     date_submission_writing: str
     category: str             # one of METADATA_CATEGORIES
     is_job_application: bool = False          # petition explicitly requesting a position/office
+    job_application_type: str = "unknown"     # specific position/office sought (if is_job_application)
     military_service_argument: bool = False   # prior military service cited as a qualification
     construction_works: bool = False          # document relates to construction or building works
+    belgian_revolution_1830: bool = False     # document mentions the Belgian Revolution of 1830
     petitioner_name: str = "unknown"
     petitioner_gender: str = "unknown"
     petitioner_occupation: str = "unknown"
@@ -337,8 +339,27 @@ def normalize_metadata(meta: "DocumentMetadata") -> "DocumentMetadata":
     return meta
 
 
-def _metadata_prompt(transcript: str) -> str:
+def _build_hints_section(hints: dict) -> str:
+    """Render a field-specific guidance block from a hints dict for injection into the metadata prompt."""
+    if not hints:
+        return ""
+    lines = ["\n## Field-specific guidance (corpus examples)\n"]
+    for field, data in hints.items():
+        lines.append(f"### {field}")
+        if isinstance(data, dict):
+            if note := data.get("hints"):
+                lines.append(note)
+            for ex in data.get("examples", []):
+                indicator = ex.get("indicator", "")
+                value = ex.get("value", "")
+                lines.append(f'  - "{indicator}" → {json.dumps(value)}')
+        lines.append("")
+    return "\n".join(lines)
+
+
+def _metadata_prompt(transcript: str, hints: dict | None = None) -> str:
     petition_types_str = ", ".join(f'"{v}"' for v in PETITION_TYPES)
+    hints_block = _build_hints_section(hints or {})
     return f"""You are an expert archivist analyzing a 19th-century historical document. You are given:
 1. An image of the document (manuscript/printed page).
 2. A refined transcription (HTR) of the text on that page.
@@ -352,8 +373,10 @@ From the image and transcript, infer the following and respond with a single JSO
 - "category": Exactly one of: petition, apostille, attachement, Other
 - "petition_type": Exactly one of: {petition_types_str}. Choose the option that best describes the nature of the request.
 - "is_job_application": true if this document is a petition or request explicitly seeking a specific position, office, job, or appointment. false otherwise.
+- "job_application_type": if is_job_application is true, the specific position, office, or job being sought (e.g. "notary", "tax collector", "schoolmaster"). "unknown" if is_job_application is false or the position is not stated.
 - "military_service_argument": true if prior military service — of the petitioner or a family member — is cited as a supporting argument or qualification for the request. false otherwise.
 - "construction_works": true if the document relates to construction, building works, repairs, infrastructure, or public works projects. This includes requests for reimbursement or subsidies for facade replacements. false otherwise.
+- "belgian_revolution_1830": true if the document explicitly mentions the Belgian Revolution of 1830 (also known as the Belgian revolt or separation from the Netherlands), whether as context, justification, or historical reference. false otherwise.
 
 ## About the petitioner/author
 - "petitioner_name": Full name of the petitioner as stated in the document. "unknown" if not mentioned.
@@ -368,7 +391,7 @@ Transcription (for context):
 ---
 {transcript[:8000]}
 ---
-
+{hints_block}
 Respond with only the JSON object."""
 
 
@@ -409,8 +432,10 @@ def _parse_metadata_response(raw: str) -> DocumentMetadata:
         date_submission_writing=data.get("date_submission_writing", "unknown"),
         category=data.get("category", "Other"),
         is_job_application=bool(data.get("is_job_application", False)),
+        job_application_type=str(data.get("job_application_type", "unknown")),
         military_service_argument=bool(data.get("military_service_argument", False)),
         construction_works=bool(data.get("construction_works", False)),
+        belgian_revolution_1830=bool(data.get("belgian_revolution_1830", False)),
         petitioner_name=data.get("petitioner_name", "unknown"),
         petitioner_gender=data.get("petitioner_gender", "unknown"),
         petitioner_occupation=data.get("petitioner_occupation", "unknown"),
@@ -423,22 +448,22 @@ def _parse_metadata_response(raw: str) -> DocumentMetadata:
     return normalize_metadata(meta)
 
 
-def _annotate_metadata_gemini(image_path: Path, transcript: str) -> DocumentMetadata:
+def _annotate_metadata_gemini(image_path: Path, transcript: str, hints: dict | None = None) -> DocumentMetadata:
     import google.generativeai as genai
     from PIL import Image as PILImage
 
     genai.configure(api_key=config.GEMINI_API_KEY)
     model = genai.GenerativeModel(config.GEMINI_MODEL)
     image = PILImage.open(image_path)
-    response = model.generate_content([_metadata_prompt(transcript), image])
+    response = model.generate_content([_metadata_prompt(transcript, hints), image])
     return _parse_metadata_response(response.text.strip())
 
 
-def _annotate_metadata_ollama(image_path: Path, transcript: str) -> DocumentMetadata:
+def _annotate_metadata_ollama(image_path: Path, transcript: str, hints: dict | None = None) -> DocumentMetadata:
     img_b64, _ = _image_to_base64(image_path)
     payload = {
         "model": config.OLLAMA_VISION_MODEL,
-        "prompt": _metadata_prompt(transcript),
+        "prompt": _metadata_prompt(transcript, hints),
         "images": [img_b64],
         "stream": False,
     }
@@ -462,12 +487,12 @@ def _enhance_metadata_ollama(transcript: str, metadata: str) -> DocumentMetadata
     result = _ollama_post("/api/generate", payload)
     return _parse_metadata_response(result["response"].strip()) 
 
-def annotate_metadata(image_path: Path, transcript: str) -> DocumentMetadata:
+def annotate_metadata(image_path: Path, transcript: str, hints: dict | None = None) -> DocumentMetadata:
     """Generate annotated metadata from an image and its refined HTR transcript."""
     config.validate_config()
     if config.BACKEND == "gemini":
-        return _annotate_metadata_gemini(image_path, transcript)
-    return _annotate_metadata_ollama(image_path, transcript)
+        return _annotate_metadata_gemini(image_path, transcript, hints)
+    return _annotate_metadata_ollama(image_path, transcript, hints)
 
 def enhance_metadata(transcript: str, metadata: str) -> DocumentMetadata:
     """Enhance the metadata by reading the transcript and the current metadata."""
