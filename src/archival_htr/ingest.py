@@ -417,22 +417,14 @@ def combine_metadata_csvs(output_dir: Path) -> list[Path]:
         if not csv_files:
             continue
         rows = []
-        header = None
         for f in csv_files:
             with open(f, newline="", encoding="utf-8", errors="replace") as fp:
-                r = csv.reader(fp)
-                row_header = next(r, None)
-                if not row_header:
-                    continue
-                if header is None:
-                    header = row_header
-                n_cols = len(row_header)
-                for row in r:
-                    if row and len(row) == n_cols:
-                        rows.append(row)
+                reader = csv.DictReader(fp)
+                for row in reader:
+                    rows.append([row.get(col, "") for col in METADATA_CSV_COLUMNS])
         with open(combined_path, "w", newline="", encoding="utf-8") as f:
             w = csv.writer(f)
-            w.writerow(header or METADATA_CSV_COLUMNS)
+            w.writerow(METADATA_CSV_COLUMNS)
             w.writerows(rows)
         console.print(f"[green]Combined[/green] → {combined_path} ({len(rows)} rows)")
         combined_paths.append(combined_path)

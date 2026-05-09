@@ -578,18 +578,19 @@ def review_update_metadata(collection: str, document: str, page: str, req: PageM
     from archival_htr.ingest import METADATA_CSV_COLUMNS, combine_metadata_csvs
     from archival_htr.llm_client import DocumentMetadata, normalize_metadata
 
-    # Normalise incoming values before writing
+    # Normalise incoming values before writing (vocabulary-controlled fields only).
+    # Boolean fields are kept as Optional[bool] — None means "unknown/not assessed".
     meta = normalize_metadata(DocumentMetadata(
         language=req.language or "unknown",
         single_page_or_part=req.single_page_or_part or "unknown",
         related_to_others=req.related_to_others or "unknown",
         date_submission_writing=req.date_submission_writing or "unknown",
         category=req.category or "Other",
-        is_job_application=req.is_job_application if req.is_job_application is not None else False,
+        is_job_application=False,
         job_application_type=req.job_application_type or "unknown",
-        military_service_argument=req.military_service_argument if req.military_service_argument is not None else False,
-        construction_works=req.construction_works if req.construction_works is not None else False,
-        belgian_revolution_1830=req.belgian_revolution_1830 if req.belgian_revolution_1830 is not None else False,
+        military_service_argument=False,
+        construction_works=False,
+        belgian_revolution_1830=False,
         petitioner_name=req.petitioner_name or "unknown",
         petitioner_gender=req.petitioner_gender or "unknown",
         petitioner_occupation=req.petitioner_occupation or "unknown",
@@ -603,7 +604,9 @@ def review_update_metadata(collection: str, document: str, page: str, req: PageM
     csv_path = Path(config.DATA_OUTPUT_DIR) / "metadata" / collection / f"{document}_{page}.csv"
     csv_path.parent.mkdir(parents=True, exist_ok=True)
 
-    def _bool_str(v: bool) -> str:
+    def _bool_str(v: Optional[bool]) -> str:
+        if v is None:
+            return ""
         return str(v).lower()
 
     with csv_path.open("w", encoding="utf-8", newline="") as fh:
@@ -617,11 +620,11 @@ def review_update_metadata(collection: str, document: str, page: str, req: PageM
             meta.related_to_others,
             meta.date_submission_writing,
             meta.category,
-            _bool_str(meta.is_job_application),
+            _bool_str(req.is_job_application),
             meta.job_application_type,
-            _bool_str(meta.military_service_argument),
-            _bool_str(meta.construction_works),
-            _bool_str(meta.belgian_revolution_1830),
+            _bool_str(req.military_service_argument),
+            _bool_str(req.construction_works),
+            _bool_str(req.belgian_revolution_1830),
             meta.petitioner_name,
             meta.petitioner_gender,
             meta.petitioner_occupation,
@@ -649,11 +652,11 @@ def review_update_metadata(collection: str, document: str, page: str, req: PageM
                 ids=result["ids"],
                 metadatas=[{
                     **m,
-                    "is_job_application": meta.is_job_application,
+                    "is_job_application": req.is_job_application,
                     "job_application_type": meta.job_application_type,
-                    "military_service_argument": meta.military_service_argument,
-                    "construction_works": meta.construction_works,
-                    "belgian_revolution_1830": meta.belgian_revolution_1830,
+                    "military_service_argument": req.military_service_argument,
+                    "construction_works": req.construction_works,
+                    "belgian_revolution_1830": req.belgian_revolution_1830,
                     "petitioner_name": meta.petitioner_name,
                     "petitioner_gender": meta.petitioner_gender,
                     "petitioner_occupation": meta.petitioner_occupation,
@@ -676,11 +679,11 @@ def review_update_metadata(collection: str, document: str, page: str, req: PageM
         date_submission_writing=_none_if_unknown(meta.date_submission_writing),
         single_page_or_part=meta.single_page_or_part,
         related_to_others=meta.related_to_others,
-        is_job_application=meta.is_job_application,
+        is_job_application=req.is_job_application,
         job_application_type=_none_if_unknown(meta.job_application_type),
-        military_service_argument=meta.military_service_argument,
-        construction_works=meta.construction_works,
-        belgian_revolution_1830=meta.belgian_revolution_1830,
+        military_service_argument=req.military_service_argument,
+        construction_works=req.construction_works,
+        belgian_revolution_1830=req.belgian_revolution_1830,
         petitioner_name=_none_if_unknown(meta.petitioner_name),
         petitioner_gender=_none_if_unknown(meta.petitioner_gender),
         petitioner_occupation=_none_if_unknown(meta.petitioner_occupation),
