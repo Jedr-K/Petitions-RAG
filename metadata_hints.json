@@ -1,0 +1,56 @@
+{
+  "_comment": "Field-specific hints for LLM metadata annotation. Each key must match a field name in DocumentMetadata. 'hints' is free-text guidance; 'examples' are short indicator→value pairs drawn from real documents.",
+
+  "petitioner_occupation": {
+    "hints": "Occupations are often stated directly after the petitioner's name, or in phrases like 'in zijn hoedanigheid als ...' or 'van beroep ...'.",
+    "examples": [
+      {"indicator": "metselaar te Gent", "value": "metselaar"},
+      {"indicator": "in zijn hoedanigheid als geneesheer", "value": "geneesheer"},
+      {"indicator": "van beroep timmerman", "value": "timmerman"}
+    ]
+  },
+
+  "construction_works": {
+    "hints": "True when the document requests reimbursement, subsidy, or permission for any building, repair, or infrastructure work. Look for words like gevelbekleding, herstellingswerken, bouwwerken, façade.",
+    "examples": [
+      {"indicator": "vervanging van de gevelbekleding", "value": true},
+      {"indicator": "herstelling van het dak", "value": true},
+      {"indicator": "aanleg van een nieuwe weg", "value": true}
+    ]
+  },
+
+  "is_job_application": {
+    "hints": "True only when the petitioner explicitly requests a named position, office, or appointment — not a general financial request.",
+    "examples": [
+      {"indicator": "verzoekt aangesteld te worden als notaris", "value": true},
+      {"indicator": "solliciteert naar de betrekking van schoolmeester", "value": true},
+      {"indicator": "verzoekt financiële steun", "value": false}
+    ]
+  },
+
+  "military_service_argument": {
+    "hints": "True when past military service — of the petitioner or a direct family member — is cited as a reason supporting the request.",
+    "examples": [
+      {"indicator": "gezien zijn dienst bij het leger van Napoleon", "value": true},
+      {"indicator": "als veteraan van de campagne van 1815", "value": true},
+      {"indicator": "wiens vader gesneuveld is in dienst van het vaderland", "value": true}
+    ]
+  },
+
+  "petition_type": {
+    "hints": "Choose the single best-fitting type. 'Job application' overlaps with is_job_application=true. 'Request for financial aid' covers pensions, subsidies, reimbursements.",
+    "examples": [
+      {"indicator": "vraagt een pensioen aan", "value": "Request for financial aid"},
+      {"indicator": "verzoekt verlof om ...", "value": "Request for permission"},
+      {"indicator": "verzoekt een attest van goed gedrag", "value": "Request for certification"}
+    ]
+  },
+
+  "petitioner_gender": {
+    "hints": "Infer from title or marital-status words only. 'weduwe' → Female, 'de heer' / 'den ondergeteekenden' → Male. Do not guess from a first name alone.",
+    "examples": [
+      {"indicator": "de weduwe van Jan Pieters", "value": "Female"},
+      {"indicator": "de heer Karel Smeets", "value": "Male"},
+    ]
+  }
+}
