@@ -457,6 +457,7 @@
         <option value="is_job_application">Job application</option>
         <option value="military_service_argument">Military service</option>
         <option value="construction_works">Construction works</option>
+        <option value="belgian_revolution_1830">Belgian Revolution 1830</option>
       </select>
 
       <label for="ov-filter-language">Language</label>
@@ -516,6 +517,23 @@
         <option value="Complaint">Complaint</option>
         <option value="other">other</option>
       </select>
+
+      <label for="ov-filter-scope">Scope</label>
+      <select id="ov-filter-scope">
+        <option value="">All</option>
+        <option value="single document">single document</option>
+        <option value="part of dossier">part of dossier</option>
+      </select>
+
+      <label for="ov-filter-belgian">Belgian Rev. 1830</label>
+      <select id="ov-filter-belgian">
+        <option value="">Any</option>
+        <option value="true">Yes</option>
+        <option value="false">No</option>
+      </select>
+
+      <label for="ov-filter-job-type">Job applied for</label>
+      <input type="text" id="ov-filter-job-type" placeholder="contains…">
 
       <button type="button" id="ov-sort-date" title="Sort document groups chronologically by earliest date">Sort by date</button>
       <button type="button" id="ov-refresh">Refresh</button>
@@ -616,6 +634,42 @@
           <option value="true">Yes</option>
           <option value="false">No</option>
         </select>
+      </div>
+      <div class="rv-edit-field">
+        <label>Belgian Revolution 1830</label>
+        <select id="rv-edit-belgian">
+          <option value="">Unknown</option>
+          <option value="true">Yes</option>
+          <option value="false">No</option>
+        </select>
+      </div>
+      <div class="rv-edit-field">
+        <label>Job application type</label>
+        <input type="text" id="rv-edit-job-type" placeholder="e.g. notary, teacher…">
+      </div>
+      <div class="rv-edit-field">
+        <label>Petitioner name</label>
+        <input type="text" id="rv-edit-petitioner-name" placeholder="e.g. Jan De Smet">
+      </div>
+      <div class="rv-edit-field">
+        <label>Petitioner occupation</label>
+        <input type="text" id="rv-edit-occupation" placeholder="e.g. farmer, merchant…">
+      </div>
+      <div class="rv-edit-field">
+        <label>Petitioner residence</label>
+        <input type="text" id="rv-edit-residence" placeholder="e.g. Ghent">
+      </div>
+      <div class="rv-edit-field">
+        <label>Petitioner birthplace</label>
+        <input type="text" id="rv-edit-birthplace" placeholder="e.g. Bruges">
+      </div>
+      <div class="rv-edit-field">
+        <label>Petitioner age</label>
+        <input type="text" id="rv-edit-age" placeholder="e.g. 34">
+      </div>
+      <div class="rv-edit-field">
+        <label>Writing for</label>
+        <input type="text" id="rv-edit-writing-for" placeholder="e.g. self, family, community…">
       </div>
       <div class="rv-edit-actions">
         <span id="rv-meta-save-status"></span>

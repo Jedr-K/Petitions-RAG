@@ -383,11 +383,13 @@ function rvRenderMeta(meta) {
   document.getElementById('rv-meta-save-status').textContent = '';
   if (!meta) {
     // No metadata on file yet — show a minimal strip with an "Add" button
-    ['rv-edit-language','rv-edit-date','rv-edit-relation'].forEach(id => {
+    ['rv-edit-language','rv-edit-date','rv-edit-relation','rv-edit-job-type',
+     'rv-edit-petitioner-name','rv-edit-occupation','rv-edit-residence',
+     'rv-edit-birthplace','rv-edit-age','rv-edit-writing-for'].forEach(id => {
       document.getElementById(id).value = '';
     });
     ['rv-edit-category','rv-edit-scope','rv-edit-job','rv-edit-mil',
-     'rv-edit-construction','rv-edit-gender','rv-edit-petition-type'].forEach(id => {
+     'rv-edit-construction','rv-edit-belgian','rv-edit-gender','rv-edit-petition-type'].forEach(id => {
       document.getElementById(id).value = '';
     });
     strip.innerHTML = '<button id="rv-meta-edit-btn" style="margin-left:0">&#9998; Add metadata</button>';
@@ -407,14 +409,24 @@ function rvRenderMeta(meta) {
   document.getElementById('rv-edit-job').value =
     meta.is_job_application === null || meta.is_job_application === undefined
       ? '' : String(meta.is_job_application);
+  document.getElementById('rv-edit-job-type').value = meta.job_application_type || '';
   document.getElementById('rv-edit-mil').value =
     meta.military_service_argument === null || meta.military_service_argument === undefined
       ? '' : String(meta.military_service_argument);
   document.getElementById('rv-edit-construction').value =
     meta.construction_works === null || meta.construction_works === undefined
       ? '' : String(meta.construction_works);
-  document.getElementById('rv-edit-gender').value       = meta.petitioner_gender || '';
-  document.getElementById('rv-edit-petition-type').value = meta.petition_type || '';
+  document.getElementById('rv-edit-belgian').value =
+    meta.belgian_revolution_1830 === null || meta.belgian_revolution_1830 === undefined
+      ? '' : String(meta.belgian_revolution_1830);
+  document.getElementById('rv-edit-petitioner-name').value = meta.petitioner_name || '';
+  document.getElementById('rv-edit-gender').value          = meta.petitioner_gender || '';
+  document.getElementById('rv-edit-occupation').value      = meta.petitioner_occupation || '';
+  document.getElementById('rv-edit-residence').value       = meta.petitioner_residence || '';
+  document.getElementById('rv-edit-birthplace').value      = meta.petitioner_birthplace || '';
+  document.getElementById('rv-edit-age').value             = meta.petitioner_age || '';
+  document.getElementById('rv-edit-writing-for').value     = meta.petitioner_writing_for || '';
+  document.getElementById('rv-edit-petition-type').value   = meta.petition_type || '';
 
   function item(label, valueHtml) {
     return '<span class="rv-meta-item"><span class="rv-meta-label">' +
@@ -433,13 +445,22 @@ function rvRenderMeta(meta) {
   if (meta.date_submission_writing) html += item('Date',     txt(meta.date_submission_writing));
   if (meta.single_page_or_part)     html += item('Scope',    txt(meta.single_page_or_part));
   if (meta.related_to_others)       html += item('Relation', txt(meta.related_to_others));
+  if (meta.petitioner_name)         html += item('Name',     txt(meta.petitioner_name));
   if (meta.petitioner_gender && meta.petitioner_gender !== 'unknown')
     html += item('Gender', txt(meta.petitioner_gender));
+  if (meta.petitioner_occupation)   html += item('Occupation',  txt(meta.petitioner_occupation));
+  if (meta.petitioner_residence)    html += item('Residence',   txt(meta.petitioner_residence));
+  if (meta.petitioner_birthplace)   html += item('Birthplace',  txt(meta.petitioner_birthplace));
+  if (meta.petitioner_age)          html += item('Age',         txt(meta.petitioner_age));
+  if (meta.petitioner_writing_for)  html += item('Writing for', txt(meta.petitioner_writing_for));
   if (meta.petition_type && meta.petition_type !== 'other')
     html += item('Petition type', txt(meta.petition_type));
   html += bool('Job application',    meta.is_job_application);
+  if (meta.is_job_application && meta.job_application_type)
+    html += item('Job type', txt(meta.job_application_type));
   html += bool('Military service',   meta.military_service_argument);
   html += bool('Construction works', meta.construction_works);
+  html += bool('Belgian Rev. 1830',  meta.belgian_revolution_1830);
 
   html += '<button id="rv-meta-edit-btn" title="Edit metadata">&#9998;</button>';
   strip.innerHTML = html || '<span class="rv-meta-none">No metadata — <button id="rv-meta-edit-btn" title="Add metadata">&#9998; Add</button></span>';
@@ -615,8 +636,9 @@ document.getElementById('rv-meta-save-btn').addEventListener('click', async () =
   statusEl.style.color = 'var(--text-dim)';
   statusEl.textContent = 'Saving…';
 
-  const jobVal = document.getElementById('rv-edit-job').value;
-  const milVal = document.getElementById('rv-edit-mil').value;
+  const jobVal     = document.getElementById('rv-edit-job').value;
+  const milVal     = document.getElementById('rv-edit-mil').value;
+  const belgianVal = document.getElementById('rv-edit-belgian').value;
   const body = {
     language:                  document.getElementById('rv-edit-language').value.trim() || null,
     category:                  document.getElementById('rv-edit-category').value || null,
@@ -624,9 +646,17 @@ document.getElementById('rv-meta-save-btn').addEventListener('click', async () =
     single_page_or_part:       document.getElementById('rv-edit-scope').value || null,
     related_to_others:         document.getElementById('rv-edit-relation').value.trim() || null,
     is_job_application:        jobVal === '' ? null : jobVal === 'true',
+    job_application_type:      document.getElementById('rv-edit-job-type').value.trim() || null,
     military_service_argument: milVal === '' ? null : milVal === 'true',
     construction_works:        (() => { const v = document.getElementById('rv-edit-construction').value; return v === '' ? null : v === 'true'; })(),
+    belgian_revolution_1830:   belgianVal === '' ? null : belgianVal === 'true',
+    petitioner_name:           document.getElementById('rv-edit-petitioner-name').value.trim() || null,
     petitioner_gender:         document.getElementById('rv-edit-gender').value || null,
+    petitioner_occupation:     document.getElementById('rv-edit-occupation').value.trim() || null,
+    petitioner_residence:      document.getElementById('rv-edit-residence').value.trim() || null,
+    petitioner_birthplace:     document.getElementById('rv-edit-birthplace').value.trim() || null,
+    petitioner_age:            document.getElementById('rv-edit-age').value.trim() || null,
+    petitioner_writing_for:    document.getElementById('rv-edit-writing-for').value.trim() || null,
     petition_type:             document.getElementById('rv-edit-petition-type').value || null,
   };
   try {
@@ -703,6 +733,7 @@ function ovCellClass(page, colorBy) {
   const boolVal = colorBy === 'is_job_application'        ? page.is_job_application
                 : colorBy === 'military_service_argument' ? page.military_service_argument
                 : colorBy === 'construction_works'        ? page.construction_works
+                : colorBy === 'belgian_revolution_1830'   ? page.belgian_revolution_1830
                 : null;
   if (boolVal === true)  return 'ov-bool-true';
   if (boolVal === false) return 'ov-bool-false';
@@ -725,21 +756,30 @@ function ovGetSwatchClass(colorBy, key) {
   return 'ov-bool-unknown';
 }
 
+function ovContains(field, q) {
+  return q ? (field || '').toLowerCase().includes(q.toLowerCase()) : true;
+}
 function ovMatchesFilter(page) {
-  const fl  = document.getElementById('ov-filter-language').value;
-  const fc  = document.getElementById('ov-filter-category').value;
-  const fj  = document.getElementById('ov-filter-job').value;
-  const fm  = document.getElementById('ov-filter-mil').value;
-  const fco = document.getElementById('ov-filter-construction').value;
-  const fg  = document.getElementById('ov-filter-gender').value;
-  const fpt = document.getElementById('ov-filter-petition-type').value;
-  if (fl  && (page.language         || '').toLowerCase() !== fl.toLowerCase())  return false;
-  if (fc  && (page.category         || '').toLowerCase() !== fc.toLowerCase())  return false;
+  const fl   = document.getElementById('ov-filter-language').value;
+  const fc   = document.getElementById('ov-filter-category').value;
+  const fsc  = document.getElementById('ov-filter-scope').value;
+  const fj   = document.getElementById('ov-filter-job').value;
+  const fjt  = document.getElementById('ov-filter-job-type').value;
+  const fm   = document.getElementById('ov-filter-mil').value;
+  const fco  = document.getElementById('ov-filter-construction').value;
+  const fb   = document.getElementById('ov-filter-belgian').value;
+  const fg   = document.getElementById('ov-filter-gender').value;
+  const fpt  = document.getElementById('ov-filter-petition-type').value;
+  if (fl  && (page.language            || '').toLowerCase() !== fl.toLowerCase())  return false;
+  if (fc  && (page.category            || '').toLowerCase() !== fc.toLowerCase())  return false;
+  if (fsc && (page.single_page_or_part || '').toLowerCase() !== fsc.toLowerCase()) return false;
   if (fj  && page.is_job_application        !== (fj  === 'true')) return false;
   if (fm  && page.military_service_argument !== (fm  === 'true')) return false;
   if (fco && page.construction_works        !== (fco === 'true')) return false;
+  if (fb  && page.belgian_revolution_1830   !== (fb  === 'true')) return false;
+  if (!ovContains(page.job_application_type,  fjt)) return false;
   if (fg  && (page.petitioner_gender || '').toLowerCase() !== fg.toLowerCase()) return false;
-  if (fpt && (page.petition_type     || '').toLowerCase() !== fpt.toLowerCase()) return false;
+  if (fpt && (page.petition_type || '').toLowerCase() !== fpt.toLowerCase()) return false;
   return true;
 }
 
@@ -882,9 +922,12 @@ function ovApplyFilter() {
   const anyFilter = (
     document.getElementById('ov-filter-language').value ||
     document.getElementById('ov-filter-category').value ||
+    document.getElementById('ov-filter-scope').value ||
     document.getElementById('ov-filter-job').value ||
+    document.getElementById('ov-filter-job-type').value ||
     document.getElementById('ov-filter-mil').value ||
     document.getElementById('ov-filter-construction').value ||
+    document.getElementById('ov-filter-belgian').value ||
     document.getElementById('ov-filter-gender').value ||
     document.getElementById('ov-filter-petition-type').value
   );
@@ -1026,10 +1069,12 @@ document.getElementById('ov-collection').addEventListener('change', () => {
 document.getElementById('ov-color-by').addEventListener('change', () => {
   if (ovPages.length) { ovRender(); }
 });
-['ov-filter-language', 'ov-filter-category', 'ov-filter-job', 'ov-filter-mil',
- 'ov-filter-construction', 'ov-filter-gender', 'ov-filter-petition-type'].forEach(id => {
+['ov-filter-language', 'ov-filter-category', 'ov-filter-scope', 'ov-filter-job',
+ 'ov-filter-mil', 'ov-filter-construction', 'ov-filter-belgian',
+ 'ov-filter-gender', 'ov-filter-petition-type'].forEach(id => {
   document.getElementById(id).addEventListener('change', () => { ovApplyFilter(); });
 });
+document.getElementById('ov-filter-job-type').addEventListener('input', () => { ovApplyFilter(); });
 document.getElementById('ov-sort-date').addEventListener('click', () => {
   ovSortByDate = !ovSortByDate;
   document.getElementById('ov-sort-date').classList.toggle('active', ovSortByDate);
