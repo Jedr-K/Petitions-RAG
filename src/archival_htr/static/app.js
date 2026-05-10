@@ -711,6 +711,15 @@ const OV_CAT_CLASS = {
   'other':       'ov-cat-andere',
 };
 
+const OV_PT_CLASS = {
+  'request for financial aid':  'ov-lang-dutch',
+  'request for permission':     'ov-lang-french',
+  'request for certification':  'ov-lang-latin',
+  'job application':            'ov-lang-english',
+  'complaint':                  'ov-lang-german',
+  'other':                      'ov-lang-other',
+};
+
 function ovCellClass(page, colorBy) {
   if (colorBy === 'language') {
     const k = (page.language || 'unknown').toLowerCase();
@@ -727,7 +736,8 @@ function ovCellClass(page, colorBy) {
     return 'ov-bool-unknown';
   }
   if (colorBy === 'petition_type') {
-    return 'ov-pt-' + (page.petition_type || 'other').toLowerCase().replace(/[^a-z]/g, '-');
+    const k = (page.petition_type || 'other').toLowerCase();
+    return OV_PT_CLASS[k] || 'ov-lang-other';
   }
   // boolean fields
   const boolVal = colorBy === 'is_job_application'        ? page.is_job_application
@@ -749,7 +759,7 @@ function ovGetSwatchClass(colorBy, key) {
     return 'ov-bool-unknown';
   }
   if (colorBy === 'petition_type') {
-    return 'ov-pt-' + key.toLowerCase().replace(/[^a-z]/g, '-');
+    return OV_PT_CLASS[key.toLowerCase()] || 'ov-lang-other';
   }
   if (key === 'true')  return 'ov-bool-true';
   if (key === 'false') return 'ov-bool-false';
