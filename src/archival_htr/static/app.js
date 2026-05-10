@@ -479,7 +479,9 @@ async function rvLoadPage(idx) {
                '/' + encodeURIComponent(rvCurrentDocument) +
                '/' + encodeURIComponent(stem);
 
-  fetch(base + '/metadata')
+  // replace spaces with underscores in the base url
+  const safeBase = base.includes(' ') ? base.replace(/ /g, '_') : base;
+  fetch(safeBase + '/metadata')
     .then(r => r.ok ? r.json() : null)
     .then(meta => rvRenderMeta(meta))
     .catch(() => rvRenderMeta(null));
@@ -718,6 +720,7 @@ const OV_PT_CLASS = {
   'job application':            'ov-lang-english',
   'complaint':                  'ov-lang-german',
   'other':                      'ov-lang-other',
+  'n/a':                        'ov-lang-unknown',
 };
 
 function ovCellClass(page, colorBy) {
