@@ -902,6 +902,15 @@ function ovRender() {
   grid.addEventListener('mouseleave', () => { document.getElementById('ov-tooltip').style.display = 'none'; });
   grid.addEventListener('click',      ovHandleClick);
 
+  // Restore selection highlight if a page is still selected
+  if (ovSelectedPage) {
+    const { col, doc, page } = ovSelectedPage;
+    grid.querySelectorAll('.ov-cell').forEach(c => {
+      if (c.dataset.col === col && c.dataset.doc === doc && c.dataset.page === page)
+        c.classList.add('ov-selected');
+    });
+  }
+
   ovApplyFilter();
   if (ovSampleActive) ovApplySample();
 }
@@ -1080,10 +1089,98 @@ function ovHandleMouseMove(e) {
   tip.style.top  = (e.clientY - 10) + 'px';
 }
 
+let ovSelectedPage = null; // { col, doc, page } | null
+
 function ovHandleClick(e) {
   const cell = e.target.closest('.ov-cell');
   if (!cell) return;
-  ovNavigateToReview(cell.dataset.col, cell.dataset.doc, cell.dataset.page);
+  ovSelectPage(cell.dataset.col, cell.dataset.doc, cell.dataset.page);
+}
+
+function ovSelectPage(col, doc, page) {
+  // Toggle off if same cell clicked again
+  if (ovSelectedPage && ovSelectedPage.col === col && ovSelectedPage.doc === doc && ovSelectedPage.page === page) {
+    ovSelectedPage = null;
+    document.querySelectorAll('.ov-cell.ov-selected').forEach(c => c.classList.remove('ov-selected'));
+    document.getElementById('ov-selection').classList.remove('visible');
+    return;
+  }
+
+  ovSelectedPage = { col, doc, page };
+  document.querySelectorAll('.ov-cell.ov-selected').forEach(c => c.classList.remove('ov-selected'));
+  document.querySelectorAll('.ov-cell').forEach(c => {
+    if (c.dataset.col === col && c.dataset.doc === doc && c.dataset.page === page)
+      c.classList.add('ov-selected');
+  });
+
+  const info = document.getElementById('ov-sel-info');
+  info.innerHTML = esc(doc) + '<small>' + esc(page) + '</small>';
+
+  const applyBtn = document.getElementById('ov-sel-apply');
+  applyBtn.textContent = 'Apply metadata to document';
+  applyBtn.disabled = false;
+
+  document.getElementById('ov-selection').classList.add('visible');
+}
+
+async function ovApplyMetadataToDocument() {
+  if (!ovSelectedPage) return;
+  const { col, doc, page } = ovSelectedPage;
+
+  const pageData = ovPages.find(p => p.collection === col && p.source_doc === doc && p.source_page === page);
+  if (!pageData) { alert('Page metadata not found in loaded data.'); return; }
+
+  const docPages = ovPages.filter(p => p.collection === col && p.source_doc === doc);
+  const otherCount = docPages.length - 1;
+  const msg = otherCount > 0
+    ? `Apply metadata from "${page}" to all ${docPages.length} pages of "${doc}" (overwriting ${otherCount} other page${otherCount === 1 ? '' : 's'})?`
+    : `Apply metadata from "${page}" to the entire document "${doc}"?`;
+  if (!confirm(msg)) return;
+
+  const btn = document.getElementById('ov-sel-apply');
+  btn.disabled = true;
+  btn.textContent = 'Applying…';
+
+  try {
+    const res = await fetch(
+      '/api/review/' + encodeURIComponent(col) + '/' + encodeURIComponent(doc) + '/apply-metadata',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          language: pageData.language,
+          single_page_or_part: pageData.single_page_or_part,
+          related_to_others: pageData.related_to_others,
+          date_submission_writing: pageData.date_submission_writing,
+          category: pageData.category,
+          is_job_application: pageData.is_job_application,
+          job_application_type: pageData.job_application_type,
+          military_service_argument: pageData.military_service_argument,
+          construction_works: pageData.construction_works,
+          belgian_revolution_1830: pageData.belgian_revolution_1830,
+          petitioner_name: pageData.petitioner_name,
+          petitioner_gender: pageData.petitioner_gender,
+          petitioner_occupation: pageData.petitioner_occupation,
+          petitioner_residence: pageData.petitioner_residence,
+          petitioner_birthplace: pageData.petitioner_birthplace,
+          petitioner_age: pageData.petitioner_age,
+          petitioner_writing_for: pageData.petitioner_writing_for,
+          petition_type: pageData.petition_type,
+        }),
+      }
+    );
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || res.statusText);
+    }
+    const result = await res.json();
+    btn.textContent = `Applied to ${result.updated} page${result.updated === 1 ? '' : 's'}`;
+    setTimeout(() => { btn.disabled = false; btn.textContent = 'Apply metadata to document'; }, 3000);
+  } catch (err) {
+    btn.disabled = false;
+    btn.textContent = 'Apply metadata to document';
+    alert('Error: ' + err.message);
+  }
 }
 
 async function ovNavigateToReview(collection, doc, page) {
@@ -1105,6 +1202,11 @@ async function ovNavigateToReview(collection, doc, page) {
 }
 
 // Event wiring
+document.getElementById('ov-sel-view').addEventListener('click', () => {
+  if (ovSelectedPage) ovNavigateToReview(ovSelectedPage.col, ovSelectedPage.doc, ovSelectedPage.page);
+});
+document.getElementById('ov-sel-apply').addEventListener('click', ovApplyMetadataToDocument);
+
 document.getElementById('ov-collection').addEventListener('change', () => {
   if (ovPages.length) { ovRender(); }
 });

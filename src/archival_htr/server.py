@@ -118,6 +118,10 @@ class PageMetadataResponse(BaseModel):
     petition_type: Optional[str] = None
 
 
+class ApplyMetadataResponse(BaseModel):
+    updated: int
+
+
 class OverviewPage(BaseModel):
     collection: str
     source_doc: str
@@ -569,17 +573,11 @@ def review_metadata(collection: str, document: str, page: str):
     )
 
 
-@app.put("/api/review/{collection}/{document}/{page}/metadata", response_model=PageMetadataResponse)
-def review_update_metadata(collection: str, document: str, page: str, req: PageMetadataResponse):
-    """Overwrite per-page metadata CSV and rebuild combined.csv."""
-    _safe_id(collection)
-    _safe_id(document)
-    _safe_id(page)
-    from archival_htr.ingest import METADATA_CSV_COLUMNS, combine_metadata_csvs
+def _write_page_metadata_csv(collection: str, document: str, page: str, req: PageMetadataResponse):
+    """Write a single-row per-page metadata CSV. Returns the normalized metadata object."""
+    from archival_htr.ingest import METADATA_CSV_COLUMNS
     from archival_htr.llm_client import DocumentMetadata, normalize_metadata
 
-    # Normalise incoming values before writing (vocabulary-controlled fields only).
-    # Boolean fields are kept as Optional[bool] — None means "unknown/not assessed".
     meta = normalize_metadata(DocumentMetadata(
         language=req.language or "unknown",
         single_page_or_part=req.single_page_or_part or "unknown",
@@ -634,6 +632,19 @@ def review_update_metadata(collection: str, document: str, page: str, req: PageM
             meta.petitioner_writing_for,
             meta.petition_type,
         ])
+
+    return meta
+
+
+@app.put("/api/review/{collection}/{document}/{page}/metadata", response_model=PageMetadataResponse)
+def review_update_metadata(collection: str, document: str, page: str, req: PageMetadataResponse):
+    """Overwrite per-page metadata CSV and rebuild combined.csv."""
+    _safe_id(collection)
+    _safe_id(document)
+    _safe_id(page)
+    from archival_htr.ingest import combine_metadata_csvs
+
+    meta = _write_page_metadata_csv(collection, document, page, req)
 
     try:
         combine_metadata_csvs(Path(config.DATA_OUTPUT_DIR))
@@ -693,6 +704,32 @@ def review_update_metadata(collection: str, document: str, page: str, req: PageM
         petitioner_writing_for=_none_if_unknown(meta.petitioner_writing_for),
         petition_type=meta.petition_type,
     )
+
+
+@app.post("/api/review/{collection}/{document}/apply-metadata", response_model=ApplyMetadataResponse)
+def review_apply_metadata(collection: str, document: str, req: PageMetadataResponse):
+    """Apply one page's metadata to every page in the document, then rebuild combined.csv."""
+    _safe_id(collection)
+    _safe_id(document)
+    from archival_htr.ingest import combine_metadata_csvs
+
+    input_folder = Path(config.DATA_INPUT_DIR) / collection / document
+    if not input_folder.is_dir():
+        raise HTTPException(status_code=404, detail=f"Document '{collection}/{document}' not found in input.")
+
+    stems = sorted(
+        p.stem for p in input_folder.iterdir()
+        if p.suffix.lower() in _REVIEW_EXTENSIONS
+    )
+    for stem in stems:
+        _write_page_metadata_csv(collection, document, stem, req)
+
+    try:
+        combine_metadata_csvs(Path(config.DATA_OUTPUT_DIR))
+    except Exception:
+        pass
+
+    return ApplyMetadataResponse(updated=len(stems))
 
 
 @app.get("/api/overview", response_model=OverviewResponse)
