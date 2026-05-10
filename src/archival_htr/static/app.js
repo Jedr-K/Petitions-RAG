@@ -958,63 +958,92 @@ function ovApplyFilter() {
   ovUpdateStats();
 }
 
-function ovUpdateStats() {
-  const statsEl = document.getElementById('ov-stats');
-  const colorBy = document.getElementById('ov-color-by').value;
-  const active  = ovVisiblePages().filter(ovMatchesFilter);
+function ovPageKey(p, colorBy) {
+  if      (colorBy === 'language')                  return p.language          || 'unknown';
+  else if (colorBy === 'category')                  return p.category          || 'unknown';
+  else if (colorBy === 'petitioner_gender')         return p.petitioner_gender || 'unknown';
+  else if (colorBy === 'petition_type')             return p.petition_type     || 'other';
+  else if (colorBy === 'is_job_application')        return p.is_job_application        == null ? 'unknown' : String(p.is_job_application);
+  else if (colorBy === 'military_service_argument') return p.military_service_argument == null ? 'unknown' : String(p.military_service_argument);
+  else if (colorBy === 'construction_works')        return p.construction_works        == null ? 'unknown' : String(p.construction_works);
+  else                                              return 'unknown';
+}
 
-  const visible = ovVisiblePages();
-  if (visible.length === 0) {
-    statsEl.innerHTML = '<span class="rv-meta-none">No pages.</span>';
-    return;
-  }
-
-  const counts = {};
-  for (const p of active) {
-    let key;
-    if      (colorBy === 'language')                  key = p.language          || 'unknown';
-    else if (colorBy === 'category')                  key = p.category          || 'unknown';
-    else if (colorBy === 'petitioner_gender')         key = p.petitioner_gender || 'unknown';
-    else if (colorBy === 'petition_type')             key = p.petition_type     || 'other';
-    else if (colorBy === 'is_job_application')        key = p.is_job_application        == null ? 'unknown' : String(p.is_job_application);
-    else if (colorBy === 'military_service_argument') key = p.military_service_argument == null ? 'unknown' : String(p.military_service_argument);
-    else if (colorBy === 'construction_works')        key = p.construction_works        == null ? 'unknown' : String(p.construction_works);
-    else                                              key = 'unknown';
-    counts[key] = (counts[key] || 0) + 1;
-  }
-
-  const total  = active.length;
-  const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
-
-  const filtered = active.length !== visible.length;
-  let totalHtml = '<div class="ov-stat-total"><b>' + total + '</b> page' +
+function ovBuildStatSection(label, total, visibleTotal, sorted, colorBy) {
+  const filtered = total !== visibleTotal;
+  const noun = label === 'Pages' ? 'page' : 'document';
+  let html = '<div class="ov-stat-section">';
+  html += '<div class="ov-stat-section-header">' + label + '</div>';
+  html += '<div class="ov-stat-total"><b>' + total + '</b> ' + noun +
     (total === 1 ? '' : 's') +
-    (filtered ? ' <span style="opacity:0.7">(of ' + visible.length + ' in collection)</span>' : '') +
+    (filtered ? ' <span style="opacity:0.7">(of ' + visibleTotal + ')</span>' : '') +
     '</div>';
 
-  let barHtml = '<div class="ov-stat-bar">';
+  html += '<div class="ov-stat-bar">';
   for (const [key, cnt] of sorted) {
     const pct = cnt / total * 100;
     const cls = ovGetSwatchClass(colorBy, key);
-    barHtml += '<div class="ov-stat-seg ' + cls + '" style="width:' + pct.toFixed(2) + '%">' +
-               (pct > 8 ? pct.toFixed(0) + '%' : '') + '</div>';
+    html += '<div class="ov-stat-seg ' + cls + '" style="width:' + pct.toFixed(2) + '%">' +
+            (pct > 8 ? pct.toFixed(0) + '%' : '') + '</div>';
   }
-  barHtml += '</div>';
+  html += '</div>';
 
-  let legendHtml = '<div class="ov-stat-legend">';
+  html += '<div class="ov-stat-legend">';
   for (const [key, cnt] of sorted) {
     const pct = (cnt / total * 100).toFixed(1);
     const cls = ovGetSwatchClass(colorBy, key);
-    legendHtml += '<div class="ov-stat-legend-item">' +
+    html += '<div class="ov-stat-legend-item">' +
       '<span class="ov-stat-swatch ' + cls + '"></span>' +
       '<span class="ov-stat-label" title="' + esc(key) + '">' + esc(key) + '</span>' +
       '<span class="ov-stat-count">' + cnt + '</span>' +
       '<span class="ov-stat-pct">' + pct + '%</span>' +
       '</div>';
   }
-  legendHtml += '</div>';
+  html += '</div></div>';
+  return html;
+}
 
-  statsEl.innerHTML = totalHtml + barHtml + legendHtml;
+function ovUpdateStats() {
+  const statsEl = document.getElementById('ov-stats');
+  const colorBy = document.getElementById('ov-color-by').value;
+  const visible = ovVisiblePages();
+  const active  = visible.filter(ovMatchesFilter);
+
+  if (visible.length === 0) {
+    statsEl.innerHTML = '<span class="rv-meta-none">No pages.</span>';
+    return;
+  }
+
+  // Page-level counts
+  const pageCounts = {};
+  for (const p of active) {
+    const key = ovPageKey(p, colorBy);
+    pageCounts[key] = (pageCounts[key] || 0) + 1;
+  }
+  const pageSorted = Object.entries(pageCounts).sort((a, b) => b[1] - a[1]);
+
+  // Document-level counts — assign each doc its majority key across active pages
+  const docPagesByKey = {};
+  for (const p of active) {
+    const doc = p.source_doc;
+    const key = ovPageKey(p, colorBy);
+    if (!docPagesByKey[doc]) docPagesByKey[doc] = {};
+    docPagesByKey[doc][key] = (docPagesByKey[doc][key] || 0) + 1;
+  }
+  const docCounts = {};
+  for (const [, keyCounts] of Object.entries(docPagesByKey)) {
+    const majority = Object.entries(keyCounts).sort((a, b) => b[1] - a[1])[0][0];
+    docCounts[majority] = (docCounts[majority] || 0) + 1;
+  }
+  const docSorted = Object.entries(docCounts).sort((a, b) => b[1] - a[1]);
+
+  // Visible totals (unfiltered) for "(of N)" labels
+  const visibleDocs = new Set(visible.map(p => p.source_doc)).size;
+  const activeDocs  = Object.keys(docPagesByKey).length;
+
+  statsEl.innerHTML =
+    ovBuildStatSection('Pages',     active.length, visible.length, pageSorted, colorBy) +
+    ovBuildStatSection('Documents', activeDocs,    visibleDocs,    docSorted,  colorBy);
 }
 
 function ovHandleMouseMove(e) {

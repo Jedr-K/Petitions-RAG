@@ -208,6 +208,9 @@
   .ov-stat-label { color: var(--text-dim); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .ov-stat-count { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
   .ov-stat-pct   { color: var(--text-dim); font-weight: 500; font-variant-numeric: tabular-nums; min-width: 3.2rem; text-align: right; }
+  .ov-stat-section { display: flex; flex-direction: column; gap: 0.4rem; }
+  .ov-stat-section + .ov-stat-section { margin-top: 0.5rem; padding-top: 0.75rem; border-top: 1px solid var(--border); }
+  .ov-stat-section-header { font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim); }
 
   .ov-cells { display: flex; flex-wrap: wrap; gap: 8px; align-content: flex-start; align-items: flex-start; }
   .ov-doc-group {
