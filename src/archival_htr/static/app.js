@@ -846,14 +846,6 @@ function ovRender() {
     return;
   }
 
-  function sortKey(p) {
-    if (colorBy === 'language')                  return p.language || 'zzz';
-    if (colorBy === 'category')                  return p.category || 'zzz';
-    if (colorBy === 'is_job_application')        return String(p.is_job_application);
-    if (colorBy === 'military_service_argument') return String(p.military_service_argument);
-    return p.source_page;
-  }
-
   // Group pages by document; render each doc as its own card.
   const byDoc = {};
   for (const p of visible) {
@@ -871,7 +863,7 @@ function ovRender() {
 
   let html = '<div class="ov-cells">';
   for (const docName of docNames) {
-    const pages = [...byDoc[docName]].sort((a, b) => sortKey(a).localeCompare(sortKey(b)));
+    const pages = [...byDoc[docName]].sort((a, b) => a.source_page.localeCompare(b.source_page));
     html += '<div class="ov-doc-group" data-col="' + esc(pages[0].collection) + '" data-doc="' + esc(docName) + '">';
     html += '<div class="ov-doc-tag" title="' + esc(docName) + '">' + esc(docName) + '</div>';
     html += '<div class="ov-doc-cells">';
