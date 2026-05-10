@@ -1,6 +1,6 @@
 # archival-htr
 
-HTR pipeline for historical manuscripts. Uses Gemini Vision to transcribe scanned images and ChromaDB for full-corpus search.
+HTR pipeline for historical manuscripts. Uses Gemini Vision or Ollama Qwen to transcribe scanned images and ChromaDB for full-corpus search.
 
 ## Quickstart
 
