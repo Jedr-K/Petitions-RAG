@@ -713,6 +713,7 @@ def review_apply_metadata(collection: str, document: str, req: PageMetadataRespo
     _safe_id(document)
     from archival_htr.ingest import combine_metadata_csvs
 
+<<<<<<< HEAD
     # Derive page list from existing per-page metadata CSVs (more robust than requiring input folder).
     metadata_dir = Path(config.DATA_OUTPUT_DIR) / "metadata" / collection
     prefix = document + "_"
@@ -724,6 +725,16 @@ def review_apply_metadata(collection: str, document: str, req: PageMetadataRespo
     if not stems:
         raise HTTPException(status_code=404, detail=f"No metadata found for '{collection}/{document}'")
 
+=======
+    input_folder = Path(config.DATA_INPUT_DIR) / collection / document
+    if not input_folder.is_dir():
+        raise HTTPException(status_code=404, detail=f"Document '{collection}/{document}' not found in input.")
+
+    stems = sorted(
+        p.stem for p in input_folder.iterdir()
+        if p.suffix.lower() in _REVIEW_EXTENSIONS
+    )
+>>>>>>> 48cfcc4d8da44e663c0a909f276355a88b21d089
     for stem in stems:
         _write_page_metadata_csv(collection, document, stem, req)
 
