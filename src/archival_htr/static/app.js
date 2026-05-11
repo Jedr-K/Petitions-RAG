@@ -880,6 +880,7 @@ function ovRender() {
               ' data-gender="'       + esc(p.petitioner_gender || '') + '"' +
               ' data-petition-type="'+ esc(p.petition_type || '') + '"' +
               ' data-job="'          + bStr(p.is_job_application)        + '"' +
+              ' data-job-type="'     + esc(p.job_application_type || '') + '"' +
               ' data-mil="'          + bStr(p.military_service_argument) + '"' +
               ' data-construction="' + bStr(p.construction_works)        + '"' +
               '></div>';
@@ -1072,6 +1073,7 @@ function ovHandleMouseMove(e) {
     cell.dataset.date         ? 'Date: '          + cell.dataset.date         : null,
     cell.dataset.gender       ? 'Gender: '        + cell.dataset.gender       : null,
     cell.dataset.petitionType ? 'Type: '          + cell.dataset.petitionType : null,
+    cell.dataset.jobType      ? 'Job type: '      + cell.dataset.jobType      : null,
     cell.dataset.construction === 'true' ? 'Construction works' : null,
   ].filter(Boolean);
 
