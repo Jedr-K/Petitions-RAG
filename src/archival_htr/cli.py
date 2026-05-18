@@ -1,4 +1,5 @@
 import json
+import os
 import typer
 from pathlib import Path
 from rich.console import Console
@@ -469,7 +470,7 @@ def fill_metadata(
 @app.command()
 def serve(
     host: str = typer.Option("0.0.0.0", "--host", help="Bind address"),
-    port: int = typer.Option(8080, "--port", "-p", help="Port to listen on"),
+    port: int = typer.Option(int(os.getenv("PORT", "8080")), "--port", "-p", help="Port to listen on"),
     reload: bool = typer.Option(False, "--reload", help="Enable uvicorn auto-reload (dev only)"),
 ):
     """Start the FastAPI web UI server on the given port."""

@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: archival-htr
+    runtime: docker
+    dockerBuildArgs:
+      EXTRAS: gemini
+    disk:
+      name: data
+      mountPath: /data
+      sizeGB: 2
+    envVars:
+      - key: BACKEND
+        value: gemini
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: INGEST_KEY
+        sync: false
+      - key: DATA_INPUT_DIR
+        value: /data/input
+      - key: DATA_OUTPUT_DIR
+        value: /data/output
+      - key: CHROMA_DIR
+        value: /data/chroma

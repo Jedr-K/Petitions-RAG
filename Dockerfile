@@ -18,8 +18,5 @@ RUN pip install --no-cache-dir -e .
 ARG EXTRAS=""
 RUN if [ -n "$EXTRAS" ]; then pip install --no-cache-dir -e ".[$EXTRAS]"; fi
 
-# Data volumes
-VOLUME ["/data/input", "/data/output", "/data/chroma"]
-
 ENTRYPOINT ["archival-htr"]
 CMD ["serve"]
