@@ -883,6 +883,7 @@ function ovRender() {
               ' data-job-type="'     + esc(p.job_application_type || '') + '"' +
               ' data-mil="'          + bStr(p.military_service_argument) + '"' +
               ' data-construction="' + bStr(p.construction_works)        + '"' +
+              ' data-belgian="'      + bStr(p.belgian_revolution_1830)   + '"' +
               '></div>';
     }
     html += '</div></div>';
@@ -961,6 +962,7 @@ function ovApplyFilter() {
       is_job_application:        b(cell.dataset.job),
       military_service_argument: b(cell.dataset.mil),
       construction_works:        b(cell.dataset.construction),
+      belgian_revolution_1830:   b(cell.dataset.belgian),
     };
     if (ovMatchesFilter(pseudo)) {
       cell.classList.add('highlighted');
@@ -981,6 +983,7 @@ function ovPageKey(p, colorBy) {
   else if (colorBy === 'is_job_application')        return p.is_job_application        == null ? 'unknown' : String(p.is_job_application);
   else if (colorBy === 'military_service_argument') return p.military_service_argument == null ? 'unknown' : String(p.military_service_argument);
   else if (colorBy === 'construction_works')        return p.construction_works        == null ? 'unknown' : String(p.construction_works);
+  else if (colorBy === 'belgian_revolution_1830')   return p.belgian_revolution_1830   == null ? 'unknown' : String(p.belgian_revolution_1830);
   else                                              return 'unknown';
 }
 
