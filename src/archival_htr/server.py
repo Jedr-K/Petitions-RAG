@@ -1,5 +1,6 @@
 """FastAPI web server for archival-htr query interface."""
 import csv
+import logging
 import re
 import subprocess
 import threading
@@ -14,10 +15,23 @@ from pydantic import BaseModel, Field
 
 from archival_htr import config
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 _STATIC_DIR = Path(__file__).parent / "static"
 
 app = FastAPI(title="archival-htr", description="HTR corpus query interface")
 app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
+
+
+@app.on_event("startup")
+def _log_config():
+    logger.info("=== archival-htr startup ===")
+    logger.info("BACKEND        : %s", config.BACKEND)
+    logger.info("DATA_INPUT_DIR : %s (exists=%s)", config.DATA_INPUT_DIR, Path(config.DATA_INPUT_DIR).exists())
+    logger.info("DATA_OUTPUT_DIR: %s (exists=%s)", config.DATA_OUTPUT_DIR, Path(config.DATA_OUTPUT_DIR).exists())
+    logger.info("CHROMA_DIR     : %s (exists=%s)", config.CHROMA_DIR, Path(config.CHROMA_DIR).exists())
+    logger.info("COLLECTION_NAME: %s", config.COLLECTION_NAME)
 
 # ── Ingest background state ──────────────────────────────────────────────────
 
@@ -264,7 +278,17 @@ def _load_transcript(source: str) -> tuple[str, int]:
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok"}
+    return {
+        "status": "ok",
+        "backend": config.BACKEND,
+        "data_input_dir": config.DATA_INPUT_DIR,
+        "data_input_exists": Path(config.DATA_INPUT_DIR).exists(),
+        "data_output_dir": config.DATA_OUTPUT_DIR,
+        "data_output_exists": Path(config.DATA_OUTPUT_DIR).exists(),
+        "chroma_dir": config.CHROMA_DIR,
+        "chroma_exists": Path(config.CHROMA_DIR).exists(),
+        "collection_name": config.COLLECTION_NAME,
+    }
 
 
 @app.get("/api/sample", response_model=SampleResponse)
