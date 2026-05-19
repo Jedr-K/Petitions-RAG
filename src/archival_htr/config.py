@@ -34,6 +34,10 @@ COLLECTION_NAME = os.getenv("COLLECTION_NAME", "manuscripts")  # ChromaDB collec
 
 SAMPLE_DOCS = os.getenv("SAMPLE_DOCS", "")  # comma-separated collection/document pairs for gewogen steekproef
 
+# --- Access control ---
+# Set to a 32-character string to enable the login screen. Leave empty to disable auth (local dev).
+ACCESS_PASSWORD = os.getenv("ACCESS_PASSWORD", "")
+
 
 def sample_docs_by_collection() -> dict[str, list[str]]:
     result: dict[str, list[str]] = {}

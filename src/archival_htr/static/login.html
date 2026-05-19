@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>archival-htr — login</title>
+<style>
+  :root {
+    --surface: #16213e;
+    --surface2: #0f3460;
+    --accent: #f92424;
+    --text: #fff;
+    --text-dim: #aab;
+    --border: #2a3a5a;
+    --radius: 8px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    background: var(--surface2);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 2.5rem 2rem;
+    width: 100%;
+    max-width: 360px;
+    text-align: center;
+  }
+  h1 { font-size: 1.3rem; font-weight: 700; margin-bottom: 0.3rem; }
+  .sub { color: var(--text-dim); font-size: 0.85rem; margin-bottom: 1.75rem; }
+  input[type=password] {
+    width: 100%;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 0.65rem 0.9rem;
+    border-radius: var(--radius);
+    font-size: 0.95rem;
+    font-family: inherit;
+    margin-bottom: 0.75rem;
+    transition: border-color 0.15s;
+  }
+  input[type=password]:focus { outline: none; border-color: var(--text-dim); }
+  button {
+    width: 100%;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    padding: 0.65rem 1.5rem;
+    border-radius: var(--radius);
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity 0.15s;
+  }
+  button:hover { opacity: 0.85; }
+  .error {
+    margin-top: 0.85rem;
+    color: var(--accent);
+    font-size: 0.85rem;
+    min-height: 1.2em;
+  }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>archival-htr</h1>
+  <p class="sub">Enter the access password to continue.</p>
+  <form method="post" action="/login">
+    <input type="password" name="password" placeholder="Password" autocomplete="current-password" autofocus>
+    <button type="submit">Access</button>
+  </form>
+  <div class="error"><!--ERROR--></div>
+</div>
+</body>
+</html>

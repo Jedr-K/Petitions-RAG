@@ -1,5 +1,7 @@
 """FastAPI web server for archival-htr query interface."""
 import csv
+import hashlib
+import hmac
 import logging
 import re
 import subprocess
@@ -8,8 +10,8 @@ from collections import Counter
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse, FileResponse, PlainTextResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -22,6 +24,36 @@ _STATIC_DIR = Path(__file__).parent / "static"
 
 app = FastAPI(title="archival-htr", description="HTR corpus query interface")
 app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
+
+
+_SESSION_COOKIE = "htr_session"
+
+
+def _access_token() -> str:
+    return hmac.new(config.ACCESS_PASSWORD.encode(), b"htr-access", hashlib.sha256).hexdigest()
+
+
+def _valid_session(request: Request) -> bool:
+    if not config.ACCESS_PASSWORD:
+        return True
+    token = request.cookies.get(_SESSION_COOKIE, "")
+    expected = _access_token()
+    return bool(token) and hmac.compare_digest(token, expected)
+
+
+@app.middleware("http")
+async def _auth_middleware(request: Request, call_next):
+    if not config.ACCESS_PASSWORD:
+        return await call_next(request)
+    path = request.url.path
+    if path in ("/login", "/api/health") or path.startswith("/static/"):
+        return await call_next(request)
+    if _valid_session(request):
+        return await call_next(request)
+    if path.startswith("/api/"):
+        return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/login", status_code=302)
 
 
 @app.on_event("startup")
@@ -275,6 +307,32 @@ def _load_transcript(source: str) -> tuple[str, int]:
 
 
 # ── Routes ───────────────────────────────────────────────────────────────────
+
+@app.get("/login", response_class=HTMLResponse)
+def login_page(error: bool = False):
+    html = (_STATIC_DIR / "login.html").read_text(encoding="utf-8")
+    if error:
+        html = html.replace("<!--ERROR-->", "Incorrect password")
+    return HTMLResponse(content=html)
+
+
+@app.post("/login")
+async def login_submit(request: Request):
+    from fastapi.responses import RedirectResponse
+    form = await request.form()
+    password = str(form.get("password", ""))
+    if config.ACCESS_PASSWORD and not hmac.compare_digest(password, config.ACCESS_PASSWORD):
+        return login_page(error=True)
+    resp = RedirectResponse(url="/", status_code=303)
+    resp.set_cookie(
+        key=_SESSION_COOKIE,
+        value=_access_token(),
+        httponly=True,
+        samesite="strict",
+        max_age=86400 * 30,
+    )
+    return resp
+
 
 @app.get("/api/health")
 def health():
