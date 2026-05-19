@@ -10,7 +10,7 @@ RUN apt-get update && apt-get install -y \
 COPY pyproject.toml README.md ./
 COPY src/ src/
 
-ARG EXTRAS=""
+ARG EXTRAS="gemini"
 RUN pip install --no-cache-dir -e ".${EXTRAS:+[$EXTRAS]}"
 
 ENTRYPOINT ["archival-htr"]
