@@ -6,7 +6,7 @@ services:
       EXTRAS: gemini
     disk:
       name: data
-      mountPath: /data
+      mountPath: /app/data
       sizeGB: 2
     envVars:
       - key: BACKEND
@@ -16,8 +16,8 @@ services:
       - key: INGEST_KEY
         sync: false
       - key: DATA_INPUT_DIR
-        value: /data/input
+        value: /app/data/input
       - key: DATA_OUTPUT_DIR
-        value: /data/output
+        value: /app/data/output
       - key: CHROMA_DIR
-        value: /data/chroma
+        value: /app/data/chroma

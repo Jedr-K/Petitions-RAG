@@ -10,13 +10,8 @@ RUN apt-get update && apt-get install -y \
 COPY pyproject.toml README.md ./
 COPY src/ src/
 
-# Install base deps. Add [gemini] extras if BACKEND=gemini is needed.
-RUN pip install --no-cache-dir -e .
-
-# To use Gemini backend, build with:
-#   docker build --build-arg EXTRAS=gemini -t archival-htr .
 ARG EXTRAS=""
-RUN if [ -n "$EXTRAS" ]; then pip install --no-cache-dir -e ".[$EXTRAS]"; fi
+RUN pip install --no-cache-dir -e ".${EXTRAS:+[$EXTRAS]}"
 
 ENTRYPOINT ["archival-htr"]
 CMD ["serve"]
