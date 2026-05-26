@@ -30,8 +30,6 @@
   .tab-panel { display: none; }
   .tab-panel.active { display: block; }
   .tab-desc { margin: 0 0 1.25rem; color: var(--muted, #888); font-size: 0.9rem; line-height: 1.55; }
-  .tabs-spacer { flex: 1; }
-  .tab-btn--admin { color: var(--text-dim); opacity: 0.6; font-size: 0.82rem; }
   main { max-width: 900px; margin: 0 auto; padding: 2rem; }
   main.review-active { max-width: none !important; padding: 0 !important; margin: 0 !important; }
   .form-row { margin-bottom: 1rem; }
@@ -44,10 +42,6 @@
   textarea:focus, input[type=text]:focus, select:focus { outline: none; border-color: var(--text-dim); }
   textarea { resize: vertical; min-height: 80px; }
   .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
-  .form-grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; }
-  .slider-row { display: flex; align-items: center; gap: 0.75rem; }
-  input[type=range] { flex: 1; accent-color: var(--accent); }
-  .slider-val { min-width: 2rem; text-align: right; font-weight: 600; color: var(--accent); }
   button[type=submit] {
     background: var(--accent); color: #fff; border: none; padding: 0.65rem 1.5rem;
     border-radius: var(--radius); font-size: 0.95rem; cursor: pointer; font-weight: 600;
@@ -263,6 +257,10 @@
   .ov-doc-group.sampled { background: #ffe944; }
   #ov-highlight-sample.active { background: #ffe944; color: #333; }
 
+  .ov-cell.date-warning { box-shadow: 0 0 0 2px #f97316; position: relative; z-index: 1; }
+  .ov-cell.no-date { filter: grayscale(1); opacity: 0.35; }
+  #ov-debug-dates.active { background: #f97316; color: #fff; border-color: #f97316; }
+
   .ov-tooltip {
     position: fixed; background: #111; color: #eee; font-size: 0.75rem;
     padding: 0.35rem 0.6rem; border-radius: 5px; pointer-events: none;
@@ -310,8 +308,6 @@
   <button class="tab-btn" data-tab="query">Query</button>
   <button class="tab-btn" data-tab="overview">Overview</button>
   <button class="tab-btn" data-tab="review">Review</button>
-  <span class="tabs-spacer"></span>
-  <button class="tab-btn tab-btn--admin" data-tab="ingest">Ingest</button>
 </div>
 
 <main>
@@ -321,46 +317,12 @@
     <p class="tab-desc">
       Search performs vector similarity search across all indexed manuscript chunks.
       Enter a phrase or topic and the index returns the most semantically related
-      passages, ranked by relevance score. Each result shows the source document,
-      a score bar, and a short excerpt. Use the <em>Results</em> slider to control
-      how many matches are returned, and the optional filters to narrow results to
-      a specific source document or metadata category.
+      passages, ranked by relevance score.
     </p>
     <form id="search-form">
       <div class="form-row">
         <label for="s-query">Search query</label>
         <textarea id="s-query" placeholder="e.g. petition requesting military pension after service in Flanders" required></textarea>
-      </div>
-      <div class="form-grid-3">
-        <div class="form-row">
-          <label>Results <span class="slider-val" id="s-n-val">5</span></label>
-          <div class="slider-row">
-            <input type="range" id="s-n" min="1" max="20" value="5">
-          </div>
-        </div>
-        <div class="form-row">
-          <label for="s-source">Source filter (optional)</label>
-          <input type="text" id="s-source" placeholder="e.g. 14  or  14/document_name">
-        </div>
-        <div class="form-row" style="grid-column: span 1"><!-- spacer --></div>
-      </div>
-      <div class="form-grid">
-        <div class="form-row">
-          <label for="s-job">Job application</label>
-          <select id="s-job">
-            <option value="">Any</option>
-            <option value="true">Yes</option>
-            <option value="false">No</option>
-          </select>
-        </div>
-        <div class="form-row">
-          <label for="s-mil">Military service</label>
-          <select id="s-mil">
-            <option value="">Any</option>
-            <option value="true">Yes</option>
-            <option value="false">No</option>
-          </select>
-        </div>
       </div>
       <button type="submit">Search</button>
     </form>
@@ -370,49 +332,14 @@
   <!-- ASK TAB -->
   <div id="tab-ask" class="tab-panel">
     <p class="tab-desc">
-      Ask extends Search by adding a language-model reasoning step. The index
-      retrieves the top N relevant chunks (controlled by the <em>Context chunks</em>
-      slider — more chunks means broader coverage but slower responses), then passes
-      them to the model, which reads them together and synthesises a single
-      natural-language answer. Use Ask when you want an interpreted response that
-      draws on evidence from across multiple documents, rather than a ranked list of
-      raw passages.
+      Ask retrieves the most relevant passages from the corpus and passes them to the
+      language model, which synthesises a single natural-language answer from across
+      multiple documents.
     </p>
     <form id="ask-form">
       <div class="form-row">
         <label for="a-question">Question</label>
         <textarea id="a-question" placeholder="e.g. What arguments do petitioners use to justify their request for a pension?" required></textarea>
-      </div>
-      <div class="form-grid-3">
-        <div class="form-row">
-          <label>Context chunks <span class="slider-val" id="a-n-val">8</span></label>
-          <div class="slider-row">
-            <input type="range" id="a-n" min="1" max="20" value="8">
-          </div>
-        </div>
-        <div class="form-row">
-          <label for="a-source">Source filter (optional)</label>
-          <input type="text" id="a-source" placeholder="e.g. 14  or  14/document_name">
-        </div>
-        <div class="form-row"></div>
-      </div>
-      <div class="form-grid">
-        <div class="form-row">
-          <label for="a-job">Job application</label>
-          <select id="a-job">
-            <option value="">Any</option>
-            <option value="true">Yes</option>
-            <option value="false">No</option>
-          </select>
-        </div>
-        <div class="form-row">
-          <label for="a-mil">Military service</label>
-          <select id="a-mil">
-            <option value="">Any</option>
-            <option value="true">Yes</option>
-            <option value="false">No</option>
-          </select>
-        </div>
       </div>
       <button type="submit">Ask</button>
     </form>
@@ -443,28 +370,6 @@
       <button type="submit" id="q-submit" disabled>Query</button>
     </form>
     <div id="query-results" class="results"></div>
-  </div>
-
-  <!-- INGEST TAB -->
-  <div id="tab-ingest" class="tab-panel">
-    <form id="ingest-form">
-      <div class="form-row">
-        <label for="i-doc">Limit to specific documents (optional)</label>
-        <input type="text" id="i-doc" placeholder="e.g. 14245707_0001  (comma-separate multiple)">
-      </div>
-      <div class="form-row" style="display:flex;align-items:center;gap:0.75rem;">
-        <input type="checkbox" id="i-overwrite" style="width:auto;accent-color:var(--accent);">
-        <label for="i-overwrite" style="text-transform:none;letter-spacing:0;font-size:0.9rem;color:var(--text);">Re-process already-transcribed documents (--overwrite)</label>
-      </div>
-      <button type="submit" id="i-submit">Start ingest</button>
-    </form>
-    <div id="ingest-status" style="margin-top:1.25rem;"></div>
-    <pre id="ingest-log" style="
-      margin-top:0.75rem;background:var(--surface);border:1px solid var(--border);
-      border-radius:var(--radius);padding:1rem;font-size:0.8rem;line-height:1.5;
-      max-height:420px;overflow-y:auto;white-space:pre-wrap;word-break:break-word;
-      display:none;color:var(--text-dim);
-    "></pre>
   </div>
 
   <!-- OVERVIEW TAB -->
@@ -567,6 +472,7 @@
       <button type="button" id="ov-sort-date" title="Sort document groups chronologically by earliest date">Sort by date</button>
       <button type="button" id="ov-refresh">Refresh</button>
       <button type="button" id="ov-highlight-sample" title="Highlight documents included in the gewogen steekproef">Highlight sample</button>
+      <button type="button" id="ov-debug-dates" title="Highlight pages with missing or out-of-range dates (1812–1845)">Debug dates</button>
     </div>
 
     <div id="ov-body">

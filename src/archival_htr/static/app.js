@@ -2,11 +2,6 @@
 function esc(s) {
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
-function threeState(val) {
-  if (val === 'true') return true;
-  if (val === 'false') return false;
-  return null;
-}
 function showSpinner(id) {
   document.getElementById(id).innerHTML = '<div class="spinner"></div>';
 }
@@ -26,7 +21,7 @@ async function apiFetch(url, body) {
 
 // ── Tab switching ─────────────────────────────────────────────────────────────
 function switchTab(name) {
-  const valid = ['search', 'ask', 'query', 'ingest', 'overview', 'review'];
+  const valid = ['search', 'ask', 'query', 'overview', 'review'];
   if (!valid.includes(name)) name = 'search';
 
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
@@ -56,14 +51,6 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
 
 window.addEventListener('hashchange', () => {
   switchTab(window.location.hash.slice(1));
-});
-
-// ── Slider labels ─────────────────────────────────────────────────────────────
-document.getElementById('s-n').addEventListener('input', e => {
-  document.getElementById('s-n-val').textContent = e.target.value;
-});
-document.getElementById('a-n').addEventListener('input', e => {
-  document.getElementById('a-n-val').textContent = e.target.value;
 });
 
 // ── Query source list ─────────────────────────────────────────────────────────
@@ -96,10 +83,6 @@ document.getElementById('search-form').addEventListener('submit', async e => {
   showSpinner('search-results');
   const body = {
     query: document.getElementById('s-query').value.trim(),
-    n: parseInt(document.getElementById('s-n').value),
-    source: document.getElementById('s-source').value.trim() || null,
-    job_application: threeState(document.getElementById('s-job').value),
-    military_service: threeState(document.getElementById('s-mil').value),
   };
   try {
     const data = await apiFetch('/api/search', body);
@@ -131,10 +114,6 @@ document.getElementById('ask-form').addEventListener('submit', async e => {
   showSpinner('ask-results');
   const body = {
     question: document.getElementById('a-question').value.trim(),
-    n: parseInt(document.getElementById('a-n').value),
-    source: document.getElementById('a-source').value.trim() || null,
-    job_application: threeState(document.getElementById('a-job').value),
-    military_service: threeState(document.getElementById('a-mil').value),
   };
   try {
     const data = await apiFetch('/api/ask', body);
@@ -149,75 +128,6 @@ document.getElementById('ask-form').addEventListener('submit', async e => {
       '</div>';
   } catch (err) {
     showError('ask-results', err.message);
-  }
-});
-
-// ── Ingest ────────────────────────────────────────────────────────────────────
-let _ingestPoll = null;
-let _ingestLogOffset = 0;
-
-function setIngestStatus(msg, colour) {
-  document.getElementById('ingest-status').innerHTML =
-    '<span style="color:' + colour + ';font-weight:600;">' + esc(msg) + '</span>';
-}
-
-function appendLog(lines) {
-  const pre = document.getElementById('ingest-log');
-  pre.style.display = 'block';
-  pre.textContent += lines.join('\n') + (lines.length ? '\n' : '');
-  pre.scrollTop = pre.scrollHeight;
-}
-
-async function pollIngest() {
-  try {
-    const resp = await fetch('/api/ingest/status');
-    const data = await resp.json();
-    appendLog(data.log.slice(_ingestLogOffset));
-    _ingestLogOffset = data.log.length;
-    if (!data.running) {
-      clearInterval(_ingestPoll);
-      _ingestPoll = null;
-      document.getElementById('i-submit').disabled = false;
-      if (data.exit_code === 0) {
-        setIngestStatus('Ingest completed successfully.', 'var(--success)');
-        loadSources();
-      } else {
-        setIngestStatus('Ingest finished with errors (exit code ' + data.exit_code + ').', 'var(--accent)');
-      }
-    }
-  } catch { /* ignore poll errors */ }
-}
-
-document.getElementById('ingest-form').addEventListener('submit', async e => {
-  e.preventDefault();
-  if (_ingestPoll) return;
-  const docVal = document.getElementById('i-doc').value.trim();
-  const body = {
-    overwrite: document.getElementById('i-overwrite').checked,
-    doc: docVal ? docVal.split(',').map(s => s.trim()).filter(Boolean) : [],
-  };
-  document.getElementById('i-submit').disabled = true;
-  document.getElementById('ingest-log').textContent = '';
-  document.getElementById('ingest-log').style.display = 'none';
-  _ingestLogOffset = 0;
-  setIngestStatus('Starting ingest…', 'var(--warn)');
-  try {
-    const resp = await fetch('/api/ingest', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    if (!resp.ok) {
-      const d = await resp.json();
-      setIngestStatus(d.detail || 'Failed to start.', 'var(--accent)');
-      document.getElementById('i-submit').disabled = false;
-      return;
-    }
-    setIngestStatus('Running…', 'var(--warn)');
-    _ingestPoll = setInterval(pollIngest, 2000);
-  } catch (err) {
-    setIngestStatus('Error: ' + err.message, 'var(--accent)');
-    document.getElementById('i-submit').disabled = false;
   }
 });
 
@@ -690,6 +600,7 @@ let ovPages     = [];
 let ovSortByDate = false;
 let ovSampleDocs   = null;   // null until first fetch; {col: [docIds]} after
 let ovSampleActive = false;
+let ovDebugDatesActive = false;
 
 function parseSortableDate(str) {
   if (!str) return Infinity;
@@ -907,6 +818,8 @@ function ovRender() {
 
   ovApplyFilter();
   if (ovSampleActive) ovApplySample();
+  if (ovDebugDatesActive) ovApplyDebugDates();
+  ovApplyNoDate();
 }
 
 async function ovLoadSample() {
@@ -932,6 +845,32 @@ document.getElementById('ov-highlight-sample').addEventListener('click', async (
   await ovLoadSample();
   ovSampleActive = !ovSampleActive;
   ovApplySample();
+});
+
+function ovDateIsInvalid(dateStr) {
+  if (!dateStr) return true;
+  const m = dateStr.match(/\b([0-9]{3,4})\b/);
+  if (!m) return true;
+  const year = parseInt(m[1], 10);
+  return year < 1812 || year > 1845;
+}
+
+function ovApplyDebugDates() {
+  document.querySelectorAll('.ov-cell').forEach(cell => {
+    cell.classList.toggle('date-warning', ovDebugDatesActive && ovDateIsInvalid(cell.dataset.date));
+  });
+  document.getElementById('ov-debug-dates').classList.toggle('active', ovDebugDatesActive);
+}
+
+function ovApplyNoDate() {
+  document.querySelectorAll('.ov-cell').forEach(cell => {
+    cell.classList.toggle('no-date', ovSortByDate && !cell.dataset.date);
+  });
+}
+
+document.getElementById('ov-debug-dates').addEventListener('click', () => {
+  ovDebugDatesActive = !ovDebugDatesActive;
+  ovApplyDebugDates();
 });
 
 function ovApplyFilter() {
@@ -960,6 +899,7 @@ function ovApplyFilter() {
       petitioner_gender:         cell.dataset.gender       || null,
       petition_type:             cell.dataset.petitionType || null,
       is_job_application:        b(cell.dataset.job),
+      job_application_type:      cell.dataset.jobType      || null,
       military_service_argument: b(cell.dataset.mil),
       construction_works:        b(cell.dataset.construction),
       belgian_revolution_1830:   b(cell.dataset.belgian),
