@@ -2,6 +2,21 @@
 
 HTR pipeline for historical manuscripts. Uses a vision model (Gemini or Ollama) to transcribe scanned images, annotates extracted metadata, and indexes everything in ChromaDB for full-corpus semantic search.
 
+## Prerequisites
+
+Before running the quickstart, make sure the following are installed and available on your system:
+
+- **Docker** (with Compose v2) — [install Docker Desktop](https://docs.docker.com/get-docker/)
+- **Python 3.10+** — only needed if you want to run the app outside Docker
+- **Ollama** (if using the default `BACKEND=ollama`) — [install Ollama](https://ollama.com/download), then pull a vision-capable model:
+  ```bash
+  ollama pull llava   # or any other vision model you intend to use
+  ```
+  Make sure the Ollama server is running (`ollama serve`) before starting the pipeline.
+- **A Gemini API key** (if using `BACKEND=gemini`) — create one at [aistudio.google.com](https://aistudio.google.com/app/apikey); no local model server needed.
+
+> You need either Ollama **or** a Gemini key — not both. See the [Configuration](#configuration) section for how to set them.
+
 ## Quickstart
 
 ```bash
@@ -16,7 +31,7 @@ docker compose build
 # 4. Transcribe + metadata + index in one step
 docker compose run --rm archival-htr ingest
 
-# 5. Search
+# 5. Search via cli
 docker compose run --rm archival-htr search "your query here" --results 10
 ```
 
