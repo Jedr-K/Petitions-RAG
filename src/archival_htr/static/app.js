@@ -21,7 +21,7 @@ async function apiFetch(url, body) {
 
 // ── Tab switching ─────────────────────────────────────────────────────────────
 function switchTab(name) {
-  const valid = ['search', 'ask', 'query', 'overview', 'review'];
+  const valid = ['search', 'ask', 'query', 'overview', 'map', 'review'];
   if (!valid.includes(name)) name = 'search';
 
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
@@ -33,10 +33,12 @@ function switchTab(name) {
 
   const isReview   = name === 'review';
   const isOverview = name === 'overview';
-  document.querySelector('main').classList.toggle('review-active', isReview || isOverview);
+  const isMap      = name === 'map';
+  document.querySelector('main').classList.toggle('review-active', isReview || isOverview || isMap);
 
   if (isReview   && !rvLoaded) { rvLoadCollections(); rvLoaded = true; }
   if (isOverview && !ovLoaded) { ovLoad(); ovLoaded = true; }
+  if (isMap) mapActivate();
 }
 
 document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -1166,6 +1168,202 @@ document.getElementById('ov-refresh').addEventListener('click', () => {
   ovLoad();
   ovLoaded = true;
 });
+
+// ── Map ─────────────────────────────────────────────────────────────────────
+// Plots petition origins (petitioner_residence) on an OpenStreetMap base layer.
+// Place names are geocoded to coordinates via a built-in gazetteer of the
+// Mechelen region, falling back to the OSM Nominatim service for anything else.
+// Resolved coordinates are cached in localStorage so we geocode each name once.
+
+const MAP_CENTER = [51.0259, 4.4776];   // Mechelen, Grote Markt
+const MAP_ZOOM = 9;
+
+// Seed gazetteer: Mechelen + surrounding municipalities and the larger Flemish
+// cities that commonly appear as petitioner residences. Keys are lower-cased.
+// Historical spelling variants map onto the same modern coordinates.
+const MAP_GAZETTEER = {
+  'mechelen': [51.0259, 4.4776], 'malines': [51.0259, 4.4776],
+  'walem': [51.0865, 4.4497], 'wallem': [51.0865, 4.4497],
+  'heffen': [51.0500, 4.4200], 'hombeek': [51.0281, 4.4022],
+  'leest': [51.0431, 4.3925], 'muizen': [51.0089, 4.5150],
+  'battel': [51.0350, 4.4550], 'nekkerspoel': [51.0330, 4.4930],
+  'bonheiden': [51.0169, 4.5511], 'rijmenam': [51.0033, 4.5850],
+  'sint-katelijne-waver': [51.0714, 4.5322], 'onze-lieve-vrouw-waver': [51.0561, 4.5589],
+  'putte': [51.0575, 4.6389], 'duffel': [51.0964, 4.5100],
+  'lier': [51.1314, 4.5706], 'lierre': [51.1314, 4.5706],
+  'willebroek': [51.0656, 4.3606], 'boom': [51.0894, 4.3689],
+  'kontich': [51.1319, 4.4472], 'aarschot': [50.9861, 4.8347],
+  'heist-op-den-berg': [51.0781, 4.7256], 'keerbergen': [50.9950, 4.6386],
+  'antwerpen': [51.2194, 4.4025], 'anvers': [51.2194, 4.4025],
+  'brussel': [50.8467, 4.3525], 'bruxelles': [50.8467, 4.3525],
+  'leuven': [50.8798, 4.7005], 'louvain': [50.8798, 4.7005],
+  'gent': [51.0543, 3.7174], 'gand': [51.0543, 3.7174],
+  'brugge': [51.2093, 3.2247], 'bruges': [51.2093, 3.2247],
+  'dendermonde': [51.0281, 4.1014], 'sint-niklaas': [51.1650, 4.1439],
+  'vilvoorde': [50.9281, 4.4267], 'turnhout': [51.3225, 4.9447],
+  'diest': [50.9853, 5.0508], 'tienen': [50.8072, 4.9381],
+};
+
+let mapObj = null;
+let mapMarkerLayer = null;
+let mapOrigins = [];        // from /api/map/origins
+let mapLoaded = false;
+let mapGeoCache = {};       // name(lower) -> [lat,lng] | null (not found)
+
+function mapLoadCache() {
+  try { mapGeoCache = JSON.parse(localStorage.getItem('htr_geocache') || '{}'); }
+  catch { mapGeoCache = {}; }
+}
+function mapSaveCache() {
+  try { localStorage.setItem('htr_geocache', JSON.stringify(mapGeoCache)); } catch {}
+}
+
+function mapNormalize(name) {
+  return name.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+// Resolve a place name to [lat, lng] or null. Order: gazetteer → cache → Nominatim.
+async function mapGeocode(name) {
+  const key = mapNormalize(name);
+  if (MAP_GAZETTEER[key]) return MAP_GAZETTEER[key];
+  if (key in mapGeoCache) return mapGeoCache[key];
+  try {
+    const url = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=be&q='
+      + encodeURIComponent(name);
+    const resp = await fetch(url, { headers: { 'Accept': 'application/json' } });
+    if (resp.ok) {
+      const data = await resp.json();
+      if (data.length > 0) {
+        const coord = [parseFloat(data[0].lat), parseFloat(data[0].lon)];
+        mapGeoCache[key] = coord;
+        mapSaveCache();
+        return coord;
+      }
+    }
+  } catch { /* offline / rate-limited — treat as unresolved */ }
+  mapGeoCache[key] = null;
+  mapSaveCache();
+  return null;
+}
+
+function mapInit() {
+  if (mapObj) return;
+  mapLoadCache();
+  mapObj = L.map('map-canvas', { center: MAP_CENTER, zoom: MAP_ZOOM });
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+  }).addTo(mapObj);
+  mapMarkerLayer = L.layerGroup().addTo(mapObj);
+}
+
+function mapActivate() {
+  mapInit();
+  // Leaflet needs a size recalculation once the container becomes visible.
+  setTimeout(() => mapObj.invalidateSize(), 0);
+  if (!mapLoaded) { mapLoaded = true; mapLoadOrigins(); }
+}
+
+async function mapLoadOrigins() {
+  const status = document.getElementById('map-status');
+  status.textContent = 'Loading origins…';
+  try {
+    const resp = await fetch('/api/map/origins');
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const data = await resp.json();
+    mapOrigins = data.origins;
+    document.getElementById('map-legend').innerHTML =
+      '<b>' + data.total_documents + '</b> petition' + (data.total_documents === 1 ? '' : 's') +
+      ' with a recorded origin across <b>' + mapOrigins.length + '</b> place' +
+      (mapOrigins.length === 1 ? '' : 's') + '.' +
+      (data.missing ? '<br><span style="opacity:0.7">' + data.missing +
+        ' page' + (data.missing === 1 ? '' : 's') + ' with no residence recorded.</span>' : '') +
+      '<br><span style="opacity:0.7">Marker size ∝ count. Unknown places are geocoded via OpenStreetMap.</span>';
+    await mapRender();
+  } catch (err) {
+    status.textContent = '';
+    document.getElementById('map-legend').innerHTML =
+      '<div class="error">' + esc(err.message) + '</div>';
+  }
+}
+
+function mapRadius(count, max) {
+  // sqrt scaling so area ≈ proportional to count; clamp to a readable range.
+  const r = 6 + 22 * Math.sqrt(count / (max || 1));
+  return Math.min(30, r);
+}
+
+async function mapRender() {
+  const status = document.getElementById('map-status');
+  const sizeBy = document.getElementById('map-size-by').value;
+  mapMarkerLayer.clearLayers();
+
+  const countOf = o => sizeBy === 'pages' ? o.pages : o.documents.length;
+  const maxCount = mapOrigins.reduce((m, o) => Math.max(m, countOf(o)), 0);
+
+  const listEl = document.getElementById('map-list');
+  const rows = [];
+  const bounds = [];
+  let resolved = 0, unresolved = 0;
+
+  status.textContent = 'Geocoding places…';
+
+  // Geocode sequentially to respect the Nominatim usage policy (~1 req/s).
+  // Gazetteer + cache hits resolve instantly, so this is fast in practice.
+  for (const o of mapOrigins) {
+    const coord = await mapGeocode(o.residence);
+    const count = countOf(o);
+    if (coord) {
+      resolved++;
+      bounds.push(coord);
+      const marker = L.circleMarker(coord, {
+        radius: mapRadius(count, maxCount),
+        color: '#533483', weight: 1.5,
+        fillColor: '#f92424', fillOpacity: 0.55,
+      });
+      const docsHtml = o.documents.slice(0, 25)
+        .map(d => esc(d)).join('<br>')
+        + (o.documents.length > 25 ? '<br>… +' + (o.documents.length - 25) + ' more' : '');
+      marker.bindPopup(
+        '<b>' + esc(o.residence) + '</b><br>' +
+        o.documents.length + ' petition' + (o.documents.length === 1 ? '' : 's') +
+        ' · ' + o.pages + ' page' + (o.pages === 1 ? '' : 's') +
+        '<div class="map-popup-docs">' + docsHtml + '</div>'
+      );
+      marker.addTo(mapMarkerLayer);
+      o._coord = coord;
+    } else {
+      unresolved++;
+      o._coord = null;
+    }
+    rows.push(
+      '<div class="map-origin-row' + (coord ? '' : ' unresolved') + '" data-res="' + esc(o.residence) + '">' +
+        '<span class="map-origin-name" title="' + esc(o.residence) +
+          (coord ? '' : ' (could not locate)') + '">' + esc(o.residence) + '</span>' +
+        '<span class="map-origin-count">' + count + '</span>' +
+      '</div>'
+    );
+  }
+
+  listEl.innerHTML = rows.join('');
+  listEl.querySelectorAll('.map-origin-row').forEach(row => {
+    row.addEventListener('click', () => {
+      const o = mapOrigins.find(x => x.residence === row.dataset.res);
+      if (o && o._coord) {
+        mapObj.setView(o._coord, 12, { animate: true });
+        mapMarkerLayer.eachLayer(l => {
+          if (l.getLatLng && l.getLatLng().lat === o._coord[0] && l.getLatLng().lng === o._coord[1]) l.openPopup();
+        });
+      }
+    });
+  });
+
+  if (bounds.length > 0) mapObj.fitBounds(bounds, { padding: [40, 40], maxZoom: 12 });
+  status.textContent = resolved + ' located' + (unresolved ? ', ' + unresolved + ' unlocated' : '');
+}
+
+document.getElementById('map-size-by').addEventListener('change', () => { if (mapOrigins.length) mapRender(); });
+document.getElementById('map-refresh').addEventListener('click', () => { mapLoaded = false; mapActivate(); });
 
 // ── Initial tab from URL hash ──────────────────────────────────────────────────
 switchTab(window.location.hash.slice(1) || 'search');

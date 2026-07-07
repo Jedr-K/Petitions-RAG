@@ -205,6 +205,19 @@ class OverviewResponse(BaseModel):
     stats: OverviewStats
 
 
+class MapOrigin(BaseModel):
+    residence: str
+    documents: list[str]      # distinct "collection/document" ids
+    pages: int                # number of pages mentioning this residence
+
+
+class MapResponse(BaseModel):
+    origins: list[MapOrigin]
+    total_documents: int      # distinct petitions with a known residence
+    total_pages: int          # pages with a known residence
+    missing: int              # pages with no residence recorded
+
+
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 _SAFE_ID_RE = re.compile(r"^[\w\-\. ]+$")
@@ -900,6 +913,62 @@ def api_overview(
                         pages.append(page)
 
     return OverviewResponse(pages=pages, stats=_compute_overview_stats(pages))
+
+
+@app.get("/api/map/origins", response_model=MapResponse)
+def api_map_origins():
+    """Aggregate petition origins by petitioner_residence for the map view.
+
+    Reads the same per-collection metadata as the overview and groups pages by
+    residence. Counts are reported both per-page and as distinct documents
+    (petitions), since one petition usually spans several pages.
+    """
+    metadata_root = Path(config.DATA_OUTPUT_DIR) / "metadata"
+    # residence (normalized key) -> {"label": str, "docs": set, "pages": int}
+    buckets: dict[str, dict] = {}
+    missing = 0
+
+    if metadata_root.is_dir():
+        for col_dir in sorted(metadata_root.iterdir()):
+            if not col_dir.is_dir():
+                continue
+            collection_name = col_dir.name
+            combined_csv = col_dir / "combined.csv"
+            csv_files = [combined_csv] if combined_csv.exists() else sorted(col_dir.glob("*.csv"))
+
+            for csv_path in csv_files:
+                with csv_path.open(encoding="utf-8", newline="") as fh:
+                    for row in csv.DictReader(fh):
+                        page = _parse_overview_row(row, collection_name)
+                        if page is None:
+                            continue
+                        residence = (page.petitioner_residence or "").strip()
+                        if not residence:
+                            missing += 1
+                            continue
+                        key = residence.lower()
+                        bucket = buckets.setdefault(
+                            key, {"label": residence, "docs": set(), "pages": 0}
+                        )
+                        bucket["pages"] += 1
+                        bucket["docs"].add(f"{collection_name}/{page.source_doc}")
+
+    origins = [
+        MapOrigin(
+            residence=b["label"],
+            documents=sorted(b["docs"]),
+            pages=b["pages"],
+        )
+        for b in buckets.values()
+    ]
+    origins.sort(key=lambda o: (-len(o.documents), -o.pages, o.residence.lower()))
+
+    return MapResponse(
+        origins=origins,
+        total_documents=len({d for b in buckets.values() for d in b["docs"]}),
+        total_pages=sum(b["pages"] for b in buckets.values()),
+        missing=missing,
+    )
 
 
 # ── Web UI ────────────────────────────────────────────────────────────────────
